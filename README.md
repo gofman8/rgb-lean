@@ -50,7 +50,7 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 | Commitments | `Commit.Mpc`, `Commit.Dbc` | multi-protocol commitment trees and proofs; opret and tapret commitments; anchors; SPV proofs |
 | Validation | `Consensus.Validation`, `Consensus.Resolver` | both validation phases with every failure and warning; witness resolvers |
 | Standard types | `Stl.Types`, `Stl.Value` | ticker, name, details, precision, terms, token data, EVM and bridge types, with their bounds |
-| Containers and stash | `Ops.State`, `Ops.Consignment`, `Ops.Witness`, `Ops.Stock` | consignments, fascia, committing bundles to a witness; the stash: import, acceptance, composition, visibility, reorg (in)validation |
+| Containers and stash | `Ops.State`, `Ops.Consignment`, `Ops.Psbt`, `Ops.Witness`, `Ops.Stock` | consignments, fascia; RGB data in a PSBT (transitions, consumer maps, opret host) and its commit; the stash: import, acceptance, composition, visibility, reorg (in)validation |
 | Wallet | `Lib.*` | rgb-lib: constants, enums, all 166 errors, objects, database, wallet state, balances, UTXO slots, vanilla operations, issuance of the five schemas, receive, send, refresh, out-of-band exchange, fail and delete, inflate, burn, link, reject lists, the transfer status machine |
 
 ## Scenarios (`Rgb/Examples`)
@@ -65,6 +65,11 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 - `Wallet`, `Transfer`, `Operations2`: two rgb-lib wallets: setup, issuance,
   blind and witness receives, sends, donations, out-of-band exchange, refresh,
   settlement, balances, inflate, burn, link, failing and deleting transfers.
+- `SafeHeight`: a payment settled with zero confirmations and forwarded at once;
+  the next receiver waits for the history to be mined; listings; the
+  consistency check of `go_online`.
+- `Contracts`: contract import and export, fee estimation.
+- `Psbt`: double spends inside a PSBT, opret host, commit rules.
 - `RejectList`: reject-list decisions.
 
 ## Theorems (`Rgb/Properties`, `Rgb/Lib/StateMachine`)
@@ -76,6 +81,8 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
   fix the output/input sums; outputs are never zero;
 - the transfer status machine: final statuses have no exit, `initiated` is never
   refreshed, settlement only by refresh from a status that saw the transaction;
+- the bundle id depends on the input map only; a passing opret or tapret
+  verification puts the commitment in the first `OP_RETURN` or taproot output;
 - fee-rate bounds, wallet creation rules, allocation predicates.
 
 ## Model simplifications
