@@ -47,3 +47,5 @@ import Rgb.Examples.Transfer
 import Rgb.Lib.Operations
 import Rgb.Examples.Operations2
 import Rgb.Lib.StateMachine
+import Rgb.Properties.Vm
+import Rgb.Properties.Wallet
