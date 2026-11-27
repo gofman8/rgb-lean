@@ -99,4 +99,15 @@ def usdt : String := issued.2.id
   fun (w, a) => (w.listUnspents.filter (·.rgbAllocations.any (·.assignment == .mintRight))).length == 2 &&
     a.initialSupply == 0) == .ok true
 
+/-! ## Pending vanilla transactions -/
+
+-- a non-dry-run begin reserves its inputs until it ends or is aborted
+def pendingUtxos : Wallet × Tx := (alice2.createUtxosBegin world0 false (feeRate := 1)).toOption.get!
+#guard (pendingUtxos.1.listPendingVanillaTxs).map (·.2) == [.createUtxos]
+-- reserved inputs cannot be used by another begin
+#guard (pendingUtxos.1.createUtxosBegin world0 false (feeRate := 1)).map (·.2.txid)
+  matches .error (.insufficientBitcoins _ _)
+#guard ((pendingUtxos.1.abortPendingVanillaTx pendingUtxos.2.txid).map (·.listPendingVanillaTxs)) == .ok []
+#guard (alice2.abortPendingVanillaTx pendingUtxos.2.txid).map (·.coloredNext) == .error .cannotAbortPendingVanillaTx
+
 end Rgb.Examples.WalletScenario

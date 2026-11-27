@@ -101,10 +101,14 @@ def invoiceString (assetId : Option String) (schema : Option AssetSchema) (a : A
 `witness_receive`), checks in rgb-lib's order. Returns the receive data. -/
 def receive (w : Wallet) (now : Nat) (witness : Bool) (assetId : Option String) (assignment : Assignment)
     (expiration : Nat) (endpoints : List String := []) (minConfirmations : Nat := 1) (quota : Nat := 1)
-    (online : Option Online := none) : Result (Wallet × ReceiveData) := do
+    (online : Option Online := none) (address : Option Script := none) : Result (Wallet × ReceiveData) := do
   let outOfBand := endpoints.isEmpty
   if quota == 0 then throw (.invalidQuota "must be at least 1")
   if outOfBand && quota > 1 then throw (.invalidQuota "a reusable invoice requires transport endpoints")
+  if address.isSome && !witness then
+    throw (.unsupportedAddressReuse "only witness receives can reuse an address")
+  if address.isSome && outOfBand then
+    throw (.unsupportedAddressReuse "address reuse requires transport endpoints")
   if !witness && quota > w.maxUtxoAllocations then
     throw (.invalidQuota s!"a blind invoice can receive at most {w.maxUtxoAllocations} transfers")
   match online with
@@ -113,8 +117,15 @@ def receive (w : Wallet) (now : Nat) (witness : Bool) (assetId : Option String) 
   let mut w := w
   let (beneficiary, recipientType, w') ← (do
     if witness then
-      let (script, w1) := w.newColoredAddress
-      pure (Beneficiary.witnessVout script, RecipientTypeFull.witness none, w1)
+      match address with
+      | some a =>
+        -- a reused address must be a colored address already handed out
+        if !((List.range w.coloredNext).any fun i => w.coloredScript i == a) then
+          throw (.cannotReuseAddress "not a revealed colored address of this wallet")
+        pure (Beneficiary.witnessVout a, RecipientTypeFull.witness none, w)
+      | none =>
+        let (script, w1) := w.newColoredAddress
+        pure (Beneficiary.witnessVout script, RecipientTypeFull.witness none, w1)
     else
       let t ← w.getUtxo [] true (some (w.maxUtxoAllocations - quota))
       let g := GraphSeal.ofOutpoint t.outpoint (now.toUInt64 * 7919 + t.idx.toUInt64)

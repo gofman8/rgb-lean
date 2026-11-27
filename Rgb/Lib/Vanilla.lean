@@ -121,6 +121,20 @@ def vanillaEnd (w : Wallet) (world : World) (tx : Tx) (type : WalletTransactionT
   db := db.markBroadcast tx
   return ({ w with db }, { world with chain }, colored.length)
 
+/-- Vanilla transactions begun and not ended: they still reserve their inputs
+(`list_pending_vanilla_txs`). -/
+def listPendingVanillaTxs (w : Wallet) : List (Txid × WalletTransactionType) :=
+  (w.db.walletTransactions.filter fun wt => w.db.reserved.any (·.forVanilla == some wt.idx)).map
+    fun wt => (wt.txid, wt.type)
+
+/-- Release the inputs of a pending vanilla transaction (`abort_pending_vanilla_tx`). -/
+def abortPendingVanillaTx (w : Wallet) (txid : Txid) : Result Wallet := do
+  let some wt := w.db.walletTransactions.find? (·.txid == txid) | throw .cannotAbortPendingVanillaTx
+  if !(w.db.reserved.any (·.forVanilla == some wt.idx)) then throw .cannotAbortPendingVanillaTx
+  return { w with db := { w.db with
+    walletTransactions := w.db.walletTransactions.filter (·.idx != wt.idx)
+    reserved := w.db.reserved.filter (·.forVanilla != some wt.idx) } }
+
 /-- `create_utxos`: begin, sign, end. A watch-only wallet cannot sign. -/
 def createUtxos (w : Wallet) (world : World) (o : Online) (upTo : Bool) (num : Option Nat := none)
     (size : Option Nat := none) (feeRate : Nat := 1) : Result (Wallet × World × Nat) := do
