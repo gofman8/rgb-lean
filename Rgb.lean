@@ -20,6 +20,7 @@ import Rgb.Schemas.Numbers
 import Rgb.Ops.State
 import Rgb.Lib.Constants
 import Rgb.Lib.Enums
+import Rgb.Lib.Error
 import Rgb.Lib.Objects
 import Rgb.Examples.Operations
 import Rgb.Lib.RejectList
