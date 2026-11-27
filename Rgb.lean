@@ -12,6 +12,7 @@ import Rgb.Consensus.Bundle
 import Rgb.Consensus.Resolver
 import Rgb.Consensus.Occurrences
 import Rgb.Consensus.Schema
+import Rgb.Consensus.Vm
 import Rgb.Properties.Seals
 import Rgb.Examples.Chain
 import Rgb.Schemas.Numbers
@@ -22,3 +23,6 @@ import Rgb.Lib.Objects
 import Rgb.Examples.Operations
 import Rgb.Lib.RejectList
 import Rgb.Examples.RejectList
+import Rgb.Commit.Mpc
+import Rgb.Commit.Dbc
+import Rgb.Examples.Commitments

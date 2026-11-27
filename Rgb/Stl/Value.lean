@@ -34,8 +34,14 @@ inductive SemId where
   | burnReason
   | burnMeta
   | issueMeta
-  /-- An operation id stored as data (BFA mint and burn references). -/
+  /-- An operation id stored as data. -/
   | opId
+  /-- A contract id stored as data (`RGBCommit.ContractId`: contract links). -/
+  | contractId
+  /-- CFA article. -/
+  | article
+  /-- UDA attachment type: id and name. -/
+  | attachmentType
   /-- A 32-byte hash stored as data. -/
   | bytes32
   /-- A compressed secp256k1 public key (33 bytes). -/
@@ -69,6 +75,9 @@ inductive StrictValue where
   | burnMeta (v : BurnMeta)
   | issueMeta (v : IssueMeta)
   | opId (v : Digest)
+  | contractId (v : Digest)
+  | article (v : Article)
+  | attachmentType (id : UInt8) (name : String)
   | bytes32 (v : Bytes)
   | pubkey (v : Bytes)
   | signature (v : Bytes)
@@ -87,7 +96,8 @@ def semId : StrictValue → SemId
   | rejectListLocation _ => .rejectListLocation | bridgeLocation _ => .bridgeLocation
   | evmContract _ => .evmContract | blockNumber _ => .blockNumber
   | burnReason _ => .burnReason | burnMeta _ => .burnMeta | issueMeta _ => .issueMeta
-  | opId _ => .opId | bytes32 _ => .bytes32 | pubkey _ => .pubkey
+  | opId _ => .opId | contractId _ => .contractId | article _ => .article
+  | attachmentType _ _ => .attachmentType | bytes32 _ => .bytes32 | pubkey _ => .pubkey
   | signature _ => .signature | raw n _ => .other n
 
 /-- Every bound of the value's type holds (what strict decoding enforces). -/
@@ -105,6 +115,8 @@ def wellFormed : StrictValue → Bool
   | bridgeLocation (.evm c) => c.address.valid
   | evmContract c => c.address.valid
   | burnReason v => v.valid
+  | article v => v.valid
+  | attachmentType _ n => 1 ≤ n.length && n.length ≤ 20 && n.toList.all Charset.isAsciiPrintable
   | burnMeta v => v.burnProofs.all ProofOfReserves.valid && v.burnProofs.length ≤ 65535
   | issueMeta v => v.reserves.all ProofOfReserves.valid && v.reserves.length ≤ 65535
   | bytes32 b => b.length == 32
@@ -119,6 +131,18 @@ def conforms (v : StrictValue) (sem : SemId) : Bool := v.semId == sem && v.wellF
 def asAmount? : StrictValue → Option UInt64
   | amount v => some v
   | _ => none
+
+/-- Strict encoding of the values scripts read as numbers or keys; other values
+encode to their text form, which no standard script reads byte by byte. -/
+def toBytes : StrictValue → Bytes
+  | amount v => Bytes.le v.toNat 8
+  | blockNumber v => Bytes.le v.v.toNat 8
+  | allocation i f => Bytes.le i.v.toNat 4 ++ Bytes.le f.toNat 8
+  | tokenData t => Bytes.le t.index.v.toNat 4 ++ Bytes.ofString (reprStr t)
+  | tokenIndex i => Bytes.le i.v.toNat 4
+  | pubkey b => b
+  | bytes32 b => b
+  | v => Bytes.ofString (reprStr v)
 
 instance : Encode StrictValue := ⟨fun v => encode (reprStr v)⟩
 

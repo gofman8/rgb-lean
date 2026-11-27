@@ -121,10 +121,23 @@ inductive SealClosingStrategy where
   | firstOpretOrTapret
   deriving DecidableEq, Ord, Hashable, Repr, Inhabited
 
-/-- A 64-byte signature attached to a transition; not part of its id. -/
+/-- Compressed public key (33 bytes) of a named secret key. -/
+def pubkeyOf (signer : String) : Bytes :=
+  0x02 :: Bytes.le (Digest.of "secp256k1:pk" [encode signer]).fingerprint.toNat 32
+
+/-- A 64-byte compact ECDSA signature attached to a transition; not part of its
+id. The model keeps the signing key's name and the signed digest. -/
 structure Signature where
-  bytes : Bytes
-  deriving DecidableEq, Ord, Hashable, Repr, Inhabited
+  signer : String
+  msg : Digest
+  deriving DecidableEq, Hashable, Repr, Inhabited
+
+/-- Sign a digest with a named key. -/
+def Signature.sign (signer : String) (msg : Digest) : Signature := ⟨signer, msg⟩
+
+/-- ECDSA verification: the signature is by the key of `pubkey`, over `msg`. -/
+def Signature.verify (sig : Signature) (pubkey : Bytes) (msg : Digest) : Bool :=
+  pubkeyOf sig.signer == pubkey && sig.msg == msg
 
 structure Genesis where
   ffv : Ffv := {}

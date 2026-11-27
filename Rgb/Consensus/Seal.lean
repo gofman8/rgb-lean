@@ -77,7 +77,10 @@ namespace GenesisSeal
 /-- The same seal as a graph seal (`transmutate`). -/
 def toGraph (s : GenesisSeal) : GraphSeal := ⟨.txid s.txid, s.vout, s.blinding⟩
 
-def conceal (s : GenesisSeal) : SecretSeal := s.toGraph.conceal
+/-- A genesis seal hashes its txid without the `TxPtr` tag, so it conceals to a
+different secret than the graph seal on the same outpoint. -/
+def conceal (s : GenesisSeal) : SecretSeal :=
+  ⟨Digest.of Tag.secretSeal [encode s.txid, encode s.vout, encode s.blinding]⟩
 
 def outpoint (s : GenesisSeal) : Outpoint := ⟨s.txid, s.vout⟩
 

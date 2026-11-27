@@ -52,7 +52,7 @@ def transferRevealed : Transition :=
 #guard ({ transfer with nonce := 1 } : Transition).id != transfer.id
 #guard ({ transfer with transitionType := tsBurn } : Transition).id != transfer.id
 -- the signature is not committed
-#guard ({ transfer with signature := some ⟨List.replicate 64 7⟩ } : Transition).id == transfer.id
+#guard ({ transfer with signature := some (Signature.sign "issuer" transfer.id.d) } : Transition).id == transfer.id
 
 def bundle : TransitionBundle := TransitionBundle.ofTransitions [transfer]
 

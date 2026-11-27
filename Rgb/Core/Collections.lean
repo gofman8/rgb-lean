@@ -134,4 +134,10 @@ abbrev Bytes := List UInt8
 /-- UTF-8 bytes of a string. -/
 def Bytes.ofString (s : String) : Bytes := s.toUTF8.toList
 
+/-- Little-endian bytes of `n` in `width` bytes. -/
+def Bytes.le (n width : Nat) : Bytes := (List.range width).map fun i => ((n >>> (8 * i)) % 256).toUInt8
+
+/-- Little-endian value of bytes. -/
+def Bytes.leValue (b : Bytes) : Nat := b.foldr (fun x acc => acc * 256 + x.toNat) 0
+
 end Rgb

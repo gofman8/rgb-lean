@@ -1,4 +1,4 @@
-import Rgb.Consensus.Schema
+import Rgb.Consensus.Vm
 import Rgb.Bitcoin.Chain
 
 /-!
@@ -58,26 +58,6 @@ def checkWitness (a : OutputAssignment) (filter : Txid → Option WitnessOrd) : 
 
 end OutputAssignment
 
-/-- Consensus order of operations for global state (`OpOrd`): genesis first,
-then transitions by type, nonce and id. -/
-inductive OpOrd where
-  | genesis
-  | transition (ty : TransitionType) (nonce : UInt64) (opid : OpId)
-  deriving DecidableEq, Ord, Repr, Inhabited
-
-/-- Order of a global value: its operation's order, then its index (`GlobalOrd`). -/
-structure GlobalOrd where
-  opOrd : OpOrd
-  idx : UInt16
-  deriving DecidableEq, Ord, Repr, Inhabited
-
-/-- A global value with its order. -/
-structure GlobalEntry where
-  ord : GlobalOrd
-  value : RevealedData
-  witness : Option Txid
-  deriving DecidableEq, Repr, Inhabited
-
 /-- Accumulated state of one contract (`UnfilteredContractState`). -/
 structure ContractState where
   contractId : ContractId
@@ -92,11 +72,7 @@ namespace ContractState
 Concealed seals add nothing; an allocation already present is not added twice. -/
 def addOperation (st : ContractState) (op : Operation) (witness : Option Txid)
     (bundleId : Option BundleId) : ContractState :=
-  let opOrd := match op with
-    | .genesis _ => OpOrd.genesis
-    | .transition t => OpOrd.transition t.transitionType t.nonce t.id
-  let globals := op.globals.toList.flatMap fun (ty, vals) =>
-    vals.zipIdx.map fun (v, i) => (ty, GlobalEntry.mk ⟨opOrd, i.toUInt16⟩ v witness)
+  let globals := op.globalEntries witness
   let allocs := op.assignments.toList.flatMap fun (ty, ta) =>
     ta.items.zipIdx.filterMap fun ((bs, st), i) =>
       bs.revealed?.map fun s =>
