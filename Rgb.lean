@@ -54,3 +54,4 @@ import Rgb.Examples.SafeHeight
 import Rgb.Lib.Contracts
 import Rgb.Examples.Contracts
 import Rgb.Examples.Psbt
+import Rgb.Properties.Commitments
