@@ -53,6 +53,31 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 | Containers and stash | `Ops.State`, `Ops.Consignment`, `Ops.Psbt`, `Ops.Witness`, `Ops.Stock` | consignments, fascia; RGB data in a PSBT (transitions, consumer maps, opret host) and its commit; the stash: import, acceptance, composition, visibility, reorg (in)validation |
 | Wallet | `Lib.*` | rgb-lib: constants, enums, all 166 errors, objects, database, wallet state, balances, UTXO slots, vanilla operations, issuance of the five schemas, receive, send, refresh, out-of-band exchange, fail and delete, inflate, burn, link, reject lists, the transfer status machine |
 
+## Bounds at a glance
+
+The code holds each bound once; this table only points to them.
+
+| Bound | Value | Where |
+|---|---|---|
+| inputs of a transition, assignments of a type, bundle input map, known transitions | 1 to 65 535 | `Consensus.Operation`, `Consensus.Bundle` |
+| global state types / metadata types of an operation | at most 255 | `Consensus.Operation` |
+| values of a global type in one operation | 1 to 65 535 (the schema may allow fewer) | `Consensus.Validation` |
+| a structured value, a metadata value | at most 65 535 bytes | `Consensus.Operation` |
+| issuer identity | 1 to 4 096 printable ASCII chars | `Consensus.Operation` |
+| fungible amounts | `u64`, every output at least 1 | `Consensus.Vm` |
+| MPC tree depth / proof path / cofactor attempts | 3 to 31 / at most 31 / 500 | `Commit.Mpc` |
+| SPV proof path | at most 32 | `Commit.Dbc` |
+| ticker / unicode ticker (BFA) / name / details | 1–8 / 1–8 chars / 1–40 / 1–255 bytes | `Stl.Types` |
+| precision / attachments of a token / reject list URL | 0–18 / at most 20 / 1–8 000 | `Stl.Types` |
+| allocations per UTXO | `min(max_allocations_per_utxo, 65 535)` | `Lib.Objects` |
+| transport endpoints of a receive or recipient | at most 3 | `Lib.Constants` |
+| invoice and operation expiration | at most 10 years ahead; an operation at least 300 s ahead and 600 s before the earliest invoice it pays | `Lib.Constants`, `Lib.Send` |
+| fee rate | at least 1 sat/vB, `rate × 250` fits `u64` | `Lib.Vanilla` |
+| fee estimation target | 1 to 1 008 blocks | `Lib.Contracts` |
+| imported contract | at most 16 MiB | `Lib.Constants` |
+| reject list | at most 100 000 entries, 7 900 000 bytes | `Lib.RejectList` |
+| sender proxy retention grace a receiver accepts | at least one day | `Lib.Constants` |
+
 ## Scenarios (`Rgb/Examples`)
 
 - `Chain`: broadcast, double spend, mining, rollback; merkle branches.
