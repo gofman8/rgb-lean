@@ -51,7 +51,10 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 | Validation | `Consensus.Validation`, `Consensus.Resolver` | both validation phases with every failure and warning; witness resolvers |
 | Standard types | `Stl.Types`, `Stl.Value` | ticker, name, details, precision, terms, token data, EVM and bridge types, with their bounds |
 | Containers and stash | `Ops.State`, `Ops.Consignment`, `Ops.Psbt`, `Ops.Witness`, `Ops.Stock` | consignments, fascia; RGB data in a PSBT (transitions, consumer maps, opret host) and its commit; the stash: import, acceptance, composition, visibility, reorg (in)validation |
+| Invoices | `Invoice.Amount`, `Invoice.Invoice` | amounts in fast32 text, coin amounts, allocations; the `rgb:` invoice URI with its parser (every error, in the library's order), printer and builder; rgb-lib's invoice layer: invoice data, the assignment each schema accepts, recipient ids, transport endpoints |
 | Wallet | `Lib.*` | rgb-lib: constants, enums, all 166 errors, objects, database, wallet state, balances, UTXO slots, vanilla operations, issuance of the five schemas, receive, send, refresh, out-of-band exchange, fail and delete, inflate, burn, link, reject lists, the transfer status machine |
+| EVM | `Lib.Evm` | the JSON-RPC reads rgb-lib makes (bridge lock records, circulating supply, reject-list contracts in pages), retries, ABI decoding, mint lock statuses, claim resolvers, the EVM chain checks of `go_online` |
+| No-wallet API | `Lib.NoWallet` | `validate_consignment` and `validate_consignment_with_resolver` in rgb-lib's check order (offchain witness, claims, both phases, reject lists), consignment and fascia inspection, `fill_spv_proofs` |
 
 ## Bounds at a glance
 
@@ -77,6 +80,8 @@ The code holds each bound once; this table only points to them.
 | imported contract | at most 16 MiB | `Lib.Constants` |
 | reject list | at most 100 000 entries, 7 900 000 bytes | `Lib.RejectList` |
 | sender proxy retention grace a receiver accepts | at least one day | `Lib.Constants` |
+| EVM reject list read | pages of 1 000 entries, at most 100 000 entries | `Lib.Evm`, `Lib.RejectList` |
+| EVM request retries | 2, after HTTP 502/503/504 or a send failure other than a timeout | `Lib.Evm` |
 
 ## Scenarios (`Rgb/Examples`)
 
@@ -96,6 +101,12 @@ The code holds each bound once; this table only points to them.
 - `Contracts`: contract import and export, fee estimation.
 - `Psbt`: double spends inside a PSBT, opret host, commit rules.
 - `RejectList`: reject-list decisions.
+- `Invoice`: amounts and allocations as text, the test invoices of
+  rgb-invoicing read back unchanged, every parse error and which one wins,
+  the builder, the assignment each schema accepts.
+- `NoWallet`: mint lock statuses, claims on the wrong chain, safe heights,
+  reject-listed outputs from URL and EVM lists, BFA mints with a confirmed,
+  pending or expired lock, inspection, SPV proof filling.
 
 ## Theorems (`Rgb/Properties`, `Rgb/Lib/StateMachine`)
 
