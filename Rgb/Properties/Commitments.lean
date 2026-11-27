@@ -51,4 +51,39 @@ theorem tapret_verify_ok (c : Digest) (tx : Tx) (p : TapretProof)
         exact eq_of_beq hs
       · simp at h
 
+/-- A contract's MPC leaf lies within the usable width of the tree. -/
+theorem Mpc.protocolIdPos_lt (p : ContractId) (cofactor depth : Nat) :
+    Mpc.protocolIdPos p cofactor depth < max 1 (2 ^ depth - cofactor) :=
+  Nat.mod_lt _ (Nat.lt_of_lt_of_le Nat.zero_lt_one (Nat.le_max_left 1 _))
+
+/-- A built tree commits to exactly the requested messages, at distinct leaves. -/
+theorem Mpc.tryCommit_ok (msgs : OrdMap ContractId BundleId) (e : UInt64) (d : Nat) (t : Mpc.MerkleTree)
+    (h : Mpc.MerkleTree.tryCommit msgs e d = .ok t) :
+    t.messages = msgs ∧ Mpc.MerkleTree.fits t.messages t.cofactor t.depth = true := by
+  unfold Mpc.MerkleTree.tryCommit at h
+  simp only [bind, Except.bind] at h
+  split at h
+  · simp at h
+  · revert h
+    generalize Mpc.maxDepth + 2 = fuel
+    generalize d = depth
+    generalize (1 : Nat) = prev
+    induction fuel generalizing depth prev with
+    | zero => intro h; simp [Mpc.MerkleTree.tryCommit.go] at h
+    | succ n ih =>
+      intro h
+      simp only [Mpc.MerkleTree.tryCommit.go] at h
+      split at h
+      · simp at h
+      · split at h
+        · rename_i c hc
+          simp at h
+          subst h
+          refine ⟨rfl, ?_⟩
+          split at hc
+          · have hp := List.find?_some hc
+            simpa using hp
+          · simp at hc
+        · exact ih _ _ h
+
 end Rgb
