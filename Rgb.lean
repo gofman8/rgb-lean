@@ -40,3 +40,7 @@ import Rgb.Lib.Wallet
 import Rgb.Lib.Vanilla
 import Rgb.Lib.Issue
 import Rgb.Examples.Wallet
+import Rgb.Lib.Receive
+import Rgb.Lib.Send
+import Rgb.Lib.Refresh
+import Rgb.Examples.Transfer
