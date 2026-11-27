@@ -62,3 +62,7 @@ import Rgb.Invoice.Amount
 import Rgb.Invoice.Invoice
 import Rgb.Examples.Invoice
 import Rgb.Properties.Evm
+import Rgb.Lib.Keys
+import Rgb.Lib.Backup
+import Rgb.Lib.Multisig
+import Rgb.Examples.Multisig
