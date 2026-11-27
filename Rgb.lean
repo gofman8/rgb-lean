@@ -50,3 +50,5 @@ import Rgb.Lib.StateMachine
 import Rgb.Properties.Vm
 import Rgb.Properties.Wallet
 import Rgb.Examples.SafeHeight
+import Rgb.Lib.Contracts
+import Rgb.Examples.Contracts
