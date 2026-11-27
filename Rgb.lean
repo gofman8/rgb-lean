@@ -32,3 +32,4 @@ import Rgb.Schemas.Standard
 import Rgb.Ops.Consignment
 import Rgb.Ops.Witness
 import Rgb.Examples.Validation
+import Rgb.Examples.Schemas
