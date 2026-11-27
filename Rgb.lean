@@ -58,3 +58,6 @@ import Rgb.Properties.Commitments
 import Rgb.Lib.Evm
 import Rgb.Lib.NoWallet
 import Rgb.Examples.NoWallet
+import Rgb.Invoice.Amount
+import Rgb.Invoice.Invoice
+import Rgb.Examples.Invoice

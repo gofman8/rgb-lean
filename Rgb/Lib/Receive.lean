@@ -14,7 +14,9 @@ Without transport endpoints the consignment is exchanged out of band; with
 endpoints it goes through RGB proxies.
 
 Recipient ids are `<chain prefix>:utxob:<seal>` or `<chain prefix>:wvout:<script>`;
-the model writes the concealed seal or script so that it can be read back.
+the model writes the concealed seal or script so that it can be read back. The
+invoice text here holds the data of an rgb-lib invoice in a model form; the real
+`rgb:` format, its parser and its builder are in `Rgb.Invoice`.
 -/
 
 namespace Rgb.Lib
