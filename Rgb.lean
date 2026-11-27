@@ -46,3 +46,4 @@ import Rgb.Lib.Refresh
 import Rgb.Examples.Transfer
 import Rgb.Lib.Operations
 import Rgb.Examples.Operations2
+import Rgb.Lib.StateMachine

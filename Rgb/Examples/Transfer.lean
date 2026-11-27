@@ -1,4 +1,5 @@
 import Rgb.Lib.Refresh
+import Rgb.Lib.StateMachine
 import Rgb.Examples.Wallet
 
 /-!
@@ -165,5 +166,21 @@ def bobFailed : Wallet × Bool := (bob2.failTransfers late bobO).toOption.get!
   (d, statusOf w invoice.batchTransferIdx)) == .ok (true, none)
 -- a settled transfer cannot be failed
 #guard (bobDone.1.failTransfers world3 bobO (some invoice.batchTransferIdx)).map (·.2) == .error .cannotFailBatchTransfer
+
+/-! ## The paths taken are allowed by the status machine -/
+
+-- Bob's blind receive: created, ACKed out of band, settled
+#guard validPath true [.waitingCounterparty, .waitingBroadcast, .settled]
+-- Alice's send: initiated by begin, waiting for the ACK, broadcast, settled
+#guard validPath false [.initiated, .waitingCounterparty, .waitingConfirmations, .settled]
+-- the donation and the witness receive
+#guard validPath false [.initiated, .waitingConfirmations, .settled]
+#guard validPath true [.waitingCounterparty, .waitingConfirmations, .settled]
+-- the expired receive failed by `fail_transfers`
+#guard validPath true [.waitingCounterparty, .failed]
+-- and paths rgb-lib never takes
+#guard !validPath true [.waitingCounterparty, .settled]
+#guard !validPath false [.settled, .failed]
+#guard !validPath true [.initiated]
 
 end Rgb.Examples.TransferScenario
