@@ -1,4 +1,4 @@
-import Rgb.Bitcoin.Chain
+import Rgb.Bitcoin.Merkle
 
 /-!
 # Chain scenarios
@@ -50,3 +50,18 @@ def c1 : Chain := (c0.broadcast pay).toOption.getD c0
 #guard ((c1.mine).rollback 1).witnessOrd pay.txid == .tentative
 
 end Rgb.Examples.ChainScenario
+
+namespace Rgb.Examples.MerkleScenario
+open Rgb
+
+def leaves : List Digest := (List.range 5).map fun i => Digest.of "leaf" [encode i]
+
+-- every leaf's branch leads to the root, including the repeated last leaf of an odd layer
+#guard (List.range 5).all fun i =>
+  rootFromBranch (leaves[i]?.getD default) i (merkleBranch leaves i) == merkleRoot leaves
+-- a branch does not prove a leaf at another position
+#guard rootFromBranch (leaves[1]?.getD default) 2 (merkleBranch leaves 1) != merkleRoot leaves
+-- a single leaf is its own root
+#guard merkleRoot [leaves[0]?.getD default] == leaves[0]?.getD default
+
+end Rgb.Examples.MerkleScenario

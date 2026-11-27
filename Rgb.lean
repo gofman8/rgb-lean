@@ -2,12 +2,14 @@ import Rgb.Core.Digest
 import Rgb.Core.Collections
 import Rgb.Bitcoin.Tx
 import Rgb.Bitcoin.Chain
+import Rgb.Bitcoin.Merkle
 import Rgb.Stl.Types
 import Rgb.Stl.Value
 import Rgb.Consensus.Ids
 import Rgb.Consensus.Seal
 import Rgb.Consensus.Operation
 import Rgb.Consensus.Bundle
+import Rgb.Consensus.Resolver
 import Rgb.Consensus.Occurrences
 import Rgb.Consensus.Schema
 import Rgb.Properties.Seals
@@ -17,3 +19,6 @@ import Rgb.Ops.State
 import Rgb.Lib.Constants
 import Rgb.Lib.Enums
 import Rgb.Lib.Objects
+import Rgb.Examples.Operations
+import Rgb.Lib.RejectList
+import Rgb.Examples.RejectList

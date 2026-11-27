@@ -120,6 +120,14 @@ instance [Encode α] : Encode (OrdSet α) := ⟨fun s => encode s.toList⟩
 
 end OrdSet
 
+/-- Results compare equal when both succeed with equal values or both fail with
+equal errors (used by scenario checks). -/
+instance {ε α : Type} [BEq ε] [BEq α] : BEq (Except ε α) where
+  beq
+    | .ok a, .ok b => a == b
+    | .error e, .error f => e == f
+    | _, _ => false
+
 /-- Byte strings (`SmallBlob` and friends). -/
 abbrev Bytes := List UInt8
 
