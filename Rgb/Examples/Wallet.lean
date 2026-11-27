@@ -30,7 +30,7 @@ def alice0 : Wallet := (Wallet.create dataOf (keysOf "alice")).toOption.get!
 
 /-- Fund Alice's first vanilla address with 100000 sats. -/
 def fundAddr : Script × Wallet := alice0.getAddress
-def world0 : World := ⟨((Chain.mk [] [] 1700000000).fund fundAddr.1 100000 0).1, 1700000000⟩
+def world0 : World := { chain := ((Chain.mk [] [] 1700000000).fund fundAddr.1 100000 0).1, now := 1700000000 }
 def alice1 : Wallet := fundAddr.2
 def online : Wallet × Online × Result Unit := alice1.goOnline world0
 def alice2 : Wallet := online.1

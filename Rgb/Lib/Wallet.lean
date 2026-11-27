@@ -1,4 +1,5 @@
 import Rgb.Lib.Db
+import Rgb.Lib.Evm
 import Rgb.Ops.Stock
 import Rgb.Schemas.Standard
 
@@ -11,17 +12,25 @@ holds bitcoin only. The wallet keeps the database of operations and the stash.
 It must be the only instance using its keys: the UTXO set is checked against the
 chain when going online.
 
-The world the wallet acts in is a simulated chain and a clock. Addresses are
-deterministic scripts derived from the master fingerprint, keychain and index.
+The world the wallet acts in is a simulated chain, a clock and the EVM nodes at
+their RPC URLs. Addresses are deterministic scripts derived from the master
+fingerprint, keychain and index.
 -/
 
 namespace Rgb.Lib
 
-/-- What online operations act on: the chain and the time. -/
+/-- What online operations act on: the chain, the time and the EVM chain behind each RPC URL. -/
 structure World where
   chain : Chain
   now : Nat
+  evm : List (String × Evm.EvmLedger) := []
   deriving Repr, Inhabited
+
+/-- The node answering at each URL: the honest node of its ledger; nothing answers elsewhere. -/
+def World.evmNet (w : World) : Evm.EvmNet := fun url =>
+  match w.evm.lookup url with
+  | some l => l.node
+  | none => .unreachable
 
 /-- The handle `go_online` returns; it must match the wallet's online session. -/
 structure Online where
@@ -59,6 +68,8 @@ structure Wallet where
   onlineId : Option Nat := none
   pending : List PendingOp := []
   inbox : List Received := []
+  /-- EVM chains checked when going online (`evm_chains`). -/
+  evmChains : List (Nat × Evm.EvmChain) := []
   deriving Repr, Inhabited
 
 /-- Standard schema rules of an rgb-lib schema. -/
@@ -141,12 +152,16 @@ def vanillaUtxos (w : Wallet) (c : Chain) : List (Outpoint × Nat) :=
     let op := tx.outpoint i
     if w.isVanilla o.script && c.isUnspent op then some (op, o.value.toNat) else none
 
-/-- Go online (`go_online`): the session is set first; then the UTXOs the
-database thinks unspent must be unspent on chain, or spent by this wallet's
-own outgoing transfer waiting for its counterparty. -/
-def goOnline (w : Wallet) (world : World) (skipConsistencyCheck : Bool := false) :
-    Wallet × Online × Result Unit :=
-  let w := { (w.sync world.chain) with onlineId := some world.now }
+/-- Go online (`go_online`): the EVM chains are checked first (a failure leaves the
+wallet as it was); then the session is set; then the UTXOs the database thinks
+unspent must be unspent on chain, or spent by this wallet's own outgoing transfer
+waiting for its counterparty. After a failed consistency check the wallet is online. -/
+def goOnline (w : Wallet) (world : World) (skipConsistencyCheck : Bool := false)
+    (evmChains : List (Nat × Evm.EvmChain) := []) : Wallet × Online × Result Unit :=
+  match Evm.checkEvmChains world.evmNet (w.data.supportedSchemas.contains .bfa) evmChains with
+  | .error e => (w, ⟨w.onlineId.getD 0⟩, .error e)
+  | .ok chains =>
+  let w := { (w.sync world.chain) with onlineId := some world.now, evmChains := chains }
   let o : Online := ⟨world.now⟩
   if skipConsistencyCheck then (w, o, .ok ()) else
   let ownWaiting := w.db.batchTransfers.filter fun b => !b.incoming && b.status == .waitingCounterparty
@@ -156,6 +171,9 @@ def goOnline (w : Wallet) (world : World) (skipConsistencyCheck : Bool := false)
     !t.spent && t.exists_ && !world.chain.isUnspent t.outpoint && !spentByOwn t.outpoint
   (w, o, if diff.isEmpty then .ok ()
     else .error (.inconsistency s!"spent bitcoins with another wallet: {diff.map (·.outpoint)}"))
+
+/-- EVM RPC URLs by chain id (`evm_rpc_urls`). -/
+def evmRpcUrls (w : Wallet) : Evm.EvmRpcUrls := w.evmChains.map fun (id, c) => (id, c.rpcUrl)
 
 /-! ## Allocations and slots -/
 
