@@ -66,3 +66,6 @@ import Rgb.Lib.Keys
 import Rgb.Lib.Backup
 import Rgb.Lib.Multisig
 import Rgb.Examples.Multisig
+import Rgb.Lib.ProxyCrypto
+import Rgb.Lib.Proxy
+import Rgb.Examples.Proxy
