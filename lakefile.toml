@@ -1,0 +1,6 @@
+name = "rgb-lean"
+version = "0.1.0"
+defaultTargets = ["Rgb"]
+
+[[lean_lib]]
+name = "Rgb"
