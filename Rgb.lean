@@ -9,5 +9,11 @@ import Rgb.Consensus.Seal
 import Rgb.Consensus.Operation
 import Rgb.Consensus.Bundle
 import Rgb.Consensus.Occurrences
+import Rgb.Consensus.Schema
 import Rgb.Properties.Seals
 import Rgb.Examples.Chain
+import Rgb.Schemas.Numbers
+import Rgb.Ops.State
+import Rgb.Lib.Constants
+import Rgb.Lib.Enums
+import Rgb.Lib.Objects
