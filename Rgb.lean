@@ -35,3 +35,8 @@ import Rgb.Examples.Validation
 import Rgb.Examples.Schemas
 import Rgb.Ops.Stock
 import Rgb.Examples.Stock
+import Rgb.Lib.Db
+import Rgb.Lib.Wallet
+import Rgb.Lib.Vanilla
+import Rgb.Lib.Issue
+import Rgb.Examples.Wallet
