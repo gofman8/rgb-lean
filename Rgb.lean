@@ -30,6 +30,7 @@ import Rgb.Commit.Dbc
 import Rgb.Examples.Commitments
 import Rgb.Schemas.Standard
 import Rgb.Ops.Consignment
+import Rgb.Ops.Psbt
 import Rgb.Ops.Witness
 import Rgb.Examples.Validation
 import Rgb.Examples.Schemas
@@ -52,3 +53,4 @@ import Rgb.Properties.Wallet
 import Rgb.Examples.SafeHeight
 import Rgb.Lib.Contracts
 import Rgb.Examples.Contracts
+import Rgb.Examples.Psbt

@@ -1,4 +1,4 @@
-import Rgb.Ops.Consignment
+import Rgb.Ops.Psbt
 
 /-!
 # Committing bundles to a witness
@@ -13,23 +13,16 @@ consumes and the witness bundles consignments carry.
 
 namespace Rgb
 
-/-- Why commitment fails (`CommitError` subset used by rgb-lib). -/
-inductive CommitError where
-  | noContracts
-  | mpc (e : Mpc.MpcError)
-  | invalidInputsNumber (n : Nat)
-  deriving DecidableEq, Repr
-
-/-- Commit the bundles into `tx` (`rgb_commit` with `OpretFirst`). -/
+/-- Commit the transitions of the bundles into `tx` the way rgb-lib colors a
+PSBT: push the transitions, flag the opret host, set the entropy and the opret
+method, then commit (`rgb_commit`). -/
 def commitBundles (tx : Tx) (bundles : List (ContractId × TransitionBundle)) (entropy : UInt64) :
-    Except CommitError Fascia := do
-  if bundles.isEmpty then throw .noContracts
-  for (_, b) in bundles do
-    if b.inputMap.size > Bound.u16 then throw (.invalidInputsNumber b.inputMap.size)
-  let msgs := OrdMap.ofList (bundles.map fun (c, b) => (c, b.bundleId))
-  let tree ← (Mpc.MerkleTree.tryCommit msgs entropy).mapError .mpc
-  let tx' := tx.withOpretCommitment tree.commitment
-  return ⟨⟨tx', tree, .opret, none, []⟩, OrdMap.ofList bundles⟩
+    Except PsbtError Fascia := do
+  let p : RgbPsbt := { tx }
+  let (p, _) ← p.pushTransitions (bundles.flatMap fun (_, b) => b.knownTransitions.map (·.transition))
+  let p := { p.setOpretHost with mpcEntropy := some entropy, closeMethod := some .opretFirst }
+  let (_, f) ← p.commit
+  return f
 
 /-- The witness bundle of one contract of a fascia. -/
 def Fascia.witnessBundle? (f : Fascia) (cid : ContractId) : Option WitnessBundle := do
