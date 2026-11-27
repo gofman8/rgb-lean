@@ -10,6 +10,7 @@ import Rgb.Consensus.Seal
 import Rgb.Consensus.Operation
 import Rgb.Consensus.Bundle
 import Rgb.Consensus.Resolver
+import Rgb.Consensus.Validation
 import Rgb.Consensus.Occurrences
 import Rgb.Consensus.Schema
 import Rgb.Consensus.Vm
@@ -26,3 +27,7 @@ import Rgb.Examples.RejectList
 import Rgb.Commit.Mpc
 import Rgb.Commit.Dbc
 import Rgb.Examples.Commitments
+import Rgb.Schemas.Standard
+import Rgb.Ops.Consignment
+import Rgb.Ops.Witness
+import Rgb.Examples.Validation
