@@ -55,3 +55,6 @@ import Rgb.Lib.Contracts
 import Rgb.Examples.Contracts
 import Rgb.Examples.Psbt
 import Rgb.Properties.Commitments
+import Rgb.Lib.Evm
+import Rgb.Lib.NoWallet
+import Rgb.Examples.NoWallet

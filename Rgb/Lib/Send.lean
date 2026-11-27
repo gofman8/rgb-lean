@@ -76,7 +76,7 @@ def inputUnspents (w : Wallet) : List (DbTxo × List LocalRgbAllocation) :=
 
 /-- Select UTXOs holding settled state of the asset until the need is covered
 (`select_rgb_inputs`); smaller holdings first. -/
-def selectInputs (w : Wallet) (assetId : String) (need : AssignmentsCollection)
+def selectInputs (_w : Wallet) (assetId : String) (need : AssignmentsCollection)
     (cands : List (DbTxo × List LocalRgbAllocation)) : Result (List DbTxo) := do
   let held (l : List LocalRgbAllocation) := l.filter fun a => a.assetId == some assetId && a.settled
   let withAsset := (cands.filter fun (_, l) => !(held l).isEmpty).mergeSort fun a b =>
