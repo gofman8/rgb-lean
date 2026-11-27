@@ -67,7 +67,7 @@ def createUtxosBegin (w : Wallet) (world : World) (upTo : Bool) (num : Option Na
   checkFeeRate feeRate
   let mut n := num.getD utxoNum
   if upTo then
-    let free := (w.availableAllocations w.db.reservedColored).length
+    let free := (w.availableAllocations w.db.reservedColored (now := some world.now)).length
     if free ≥ n then throw .allocationsAlreadyAvailable
     n := n - free
   let inputs := (w.vanillaUtxos world.chain).filter fun (o, _) => !w.db.reservedVanilla.contains o

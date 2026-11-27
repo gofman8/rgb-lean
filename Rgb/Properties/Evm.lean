@@ -22,6 +22,18 @@ theorem mintLockStatusOf_pending (r : Option Nat) (beforeBlock fin : Nat) :
   | none => simp only [mintLockStatusOf]; split <;> simp_all <;> omega
   | some b => simp only [mintLockStatusOf]; split <;> simp
 
+/-- `mint_begin` accepts exactly the blocks that leave a block for the lock after the latest one
+and lie from `minMintLockBlocks` to `maxMintLockBlocks` blocks after it. -/
+theorem checkMintBeforeBlock_ok_iff (bb latest : Nat) (c : EvmChain) :
+    checkMintBeforeBlock bb latest c = .ok () ↔
+      satAdd latest 1 < bb ∧ satAdd latest c.minMintLockBlocks ≤ bb ∧
+        bb ≤ satAdd latest c.maxMintLockBlocks := by
+  unfold checkMintBeforeBlock
+  by_cases h1 : bb ≤ satAdd latest 1 <;> by_cases h2 : bb < satAdd latest c.minMintLockBlocks <;>
+    by_cases h3 : bb > satAdd latest c.maxMintLockBlocks <;>
+    simp [h1, h2, h3, throw, throwThe, MonadExceptOf.throw, pure, Except.pure, bind,
+      Except.bind] <;> omega
+
 theorem attemptsMade_go_length (k : Nat) (l : List Attempt) (hk : k ≤ rpcRetries) :
     (attemptsMade.go k l).length ≤ rpcRetries + 1 - k := by
   induction l generalizing k with

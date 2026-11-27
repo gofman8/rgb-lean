@@ -116,6 +116,9 @@ inductive Layer1 where
   | liquid
   deriving DecidableEq, Repr, Inhabited
 
+/-- Lowercase name of a layer 1 (`Display`). -/
+instance : ToString Layer1 := ⟨fun | .bitcoin => "bitcoin" | .liquid => "liquid"⟩
+
 /-- Chain and network a contract is bound to (`ChainNet`, wire values 0..7). -/
 inductive ChainNet where
   | bitcoinMainnet

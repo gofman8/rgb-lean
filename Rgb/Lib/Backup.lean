@@ -1,3 +1,4 @@
+import Rgb.Lib.Db
 import Rgb.Lib.Keys
 
 /-!
@@ -41,10 +42,6 @@ def pubDataFile : String := "backup.pub_data"
 def zipFile : String := "backup.zip"
 /-- Wallet database file (`rgb_lib_db`). -/
 def dbFile : String := "rgb_lib_db"
-/-- Log file of a wallet directory, left out of backups. -/
-def logFile : String := "log"
-/-- Directory an interrupted RGB store migration leaves, left out of backups. -/
-def deletingDir : String := "rgb.deleting"
 /-- Temporary directory the model uses where rgb-lib makes a random one. -/
 def tempDir : String := ".tmp"
 /-- Text of the `io` error for a missing file (`ErrorKind::NotFound`). -/
@@ -272,24 +269,16 @@ end Fs
 
 /-! ## The `backup_info` row -/
 
-/-- The `backup_info` row: unix nanosecond times of the last backup and of the last
-operation, and, for multisig wallets, the index of the last hub operation processed. -/
-structure Info where
-  lastBackupTimestamp : Nat := 0
-  lastOperationTimestamp : Nat := 0
-  lastProcessedOperationIdx : Option Nat := none
-  deriving DecidableEq, Repr, Inhabited
-
 /-- `backup_info()`: a backup is required when the row exists and the last operation is
 later than the last backup. -/
-def required : Option Info → Bool
+def required : Option DbBackupInfo → Bool
   | none => false
   | some i => i.lastOperationTimestamp > i.lastBackupTimestamp
 
 /-- `update_backup_info_with_op_idx`: a backup sets the backup time, any other change
 the operation time; without an operation index the stored one stays. -/
-def update (row : Option Info) (doingBackup : Bool) (now : Nat) (opIdx : Option Nat := none) :
-    Info :=
+def update (row : Option DbBackupInfo) (doingBackup : Bool) (now : Nat)
+    (opIdx : Option Nat := none) : DbBackupInfo :=
   let r := row.getD {}
   let r := if doingBackup then { r with lastBackupTimestamp := now }
     else { r with lastOperationTimestamp := now }
@@ -298,14 +287,14 @@ def update (row : Option Info) (doingBackup : Bool) (now : Nat) (opIdx : Option 
   | none => r
 
 /-- The row as the model writes it in the database file. -/
-def Info.render (i : Info) : String :=
+def renderInfo (i : DbBackupInfo) : String :=
   let idx := match i.lastProcessedOperationIdx with
     | some n => toString n
     | none => "-"
   s!"backup_info {i.lastBackupTimestamp} {i.lastOperationTimestamp} {idx}"
 
 /-- The row of database file text; `none` for a database without it. -/
-def Info.parse? (s : String) : Option Info :=
+def parseInfo? (s : String) : Option DbBackupInfo :=
   match s.splitOn " " with
   | ["backup_info", b, o, idx] => do
     let lastBackupTimestamp ← b.toNat?
@@ -315,14 +304,14 @@ def Info.parse? (s : String) : Option Info :=
   | _ => none
 
 /-- The `backup_info` row of a wallet directory. -/
-def readInfo (fs : Fs) (walletDir : String) : Option Info :=
+def readInfo (fs : Fs) (walletDir : String) : Option DbBackupInfo :=
   match fs.get? (join walletDir dbFile) with
-  | some (.file t) => Info.parse? t
+  | some (.file t) => parseInfo? t
   | _ => none
 
 /-- Write the `backup_info` row of a wallet directory. -/
-def writeInfo (fs : Fs) (walletDir : String) (i : Info) : Fs :=
-  fs.write (join walletDir dbFile) (.file i.render)
+def writeInfo (fs : Fs) (walletDir : String) (i : DbBackupInfo) : Fs :=
+  fs.write (join walletDir dbFile) (.file (renderInfo i))
 
 /-- `backup_info()` of a wallet directory. -/
 def backupRequired (fs : Fs) (walletDir : String) : Bool := required (readInfo fs walletDir)
@@ -345,8 +334,8 @@ def zipDir (fs : Fs) (walletDir : String) : List Entry :=
       if baseName q == logFile then none else some { name := rel q, content := some c }
     | (_, .backup _ _) => none
   let kept := (fs.below walletDir).filter fun (q, _) =>
-    !(((rel q).splitOn "/").contains deletingDir)
-  if base == deletingDir then [] else { name := base ++ "/" } :: kept.filterMap entry
+    !(((rel q).splitOn "/").contains rgbRuntimeDeletingDir)
+  if base == rgbRuntimeDeletingDir then [] else { name := base ++ "/" } :: kept.filterMap entry
 
 /-- `backup(backup_path, password)`. The backup time is set before the archive is made,
 so the archive holds it; on error it is reset. `salt` and `nonce` stand for the random

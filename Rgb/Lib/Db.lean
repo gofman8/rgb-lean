@@ -36,9 +36,14 @@ structure DbBatchTransfer where
   expiration : Option Nat := none
   minConfirmations : Nat := 1
   incoming : Bool
-  /-- Seed of the per-operation Ed25519 key (none: a legacy transfer). -/
+  /-- Seed of the per-operation Ed25519 key (none: a legacy transfer, or an operation with no
+  counterparty). -/
   operationSecretKey : Option String := none
+  /-- Until when the signed transaction may be broadcast: the operation expiration plus the
+  sender proxy retention grace. -/
   broadcastDeadline : Option Nat := none
+  /-- Blind receive reserved on proxies: the invoice expiration plus their longest retention
+  grace, until which a transfer to it can still be downloaded. -/
   retentionDeadline : Option Nat := none
   deriving DecidableEq, Repr, Inhabited
 
@@ -61,13 +66,20 @@ structure DbTransfer where
   recipientId : Option String := none
   ack : Option Bool := none
   invoiceString : Option String := none
+  /-- Hex public key of the recipient's operation key; none for an out-of-band recipient. -/
   recipientPubkey : Option String := none
+  /-- Hex SHA-256 of the plaintext consignment file. -/
   consignmentHash : Option String := none
   recipientEncryption : Encryption := .unsupported
+  /-- The recipient's signature of its answer, as the sender proxy served it (hex). -/
   ackSignature : Option String := none
+  /-- Id of the transfer on the proxies. -/
   proxyTransferId : Option String := none
   invoiceExpiration : Option Nat := none
+  /-- The reusable invoice the receive belongs to. -/
   invoiceIdx : Option Nat := none
+  /-- Data directory of a receive sharing its recipient id with others (`receive_dir`). -/
+  receiveDir : Option String := none
   deriving DecidableEq, Repr, Inhabited
 
 /-- One allocation put on or taken off a TXO (`coloring`). -/
@@ -102,8 +114,10 @@ structure DbAsset where
 /-- A transport endpoint used by a transfer, with its role. -/
 structure DbTransferEndpoint where
   transferIdx : Nat
+  /-- The proxy's HTTP URL. -/
   endpoint : String
   kind : TransportEndpointKind
+  /-- The recipient proxy the consignment went through. -/
   used : Bool := false
   deriving DecidableEq, Repr, Inhabited
 
@@ -126,13 +140,61 @@ structure DbInvoice where
   idx : Nat
   quota : Nat
   assetId : Option String
+  /-- The latest proxy retention deadline plus the clock skew margin: before it the invoice is
+  live and its proxies are asked for the transfers to it. -/
   deadline : Nat
   deriving DecidableEq, Repr, Inhabited
 
-/-- Last backup and last operation times (`backup_info`). -/
+/-- `DbInvoice::live`: the invoice can still receive transfers. -/
+def DbInvoice.live (i : DbInvoice) (now : Nat) : Bool := now < i.deadline
+
+namespace DbBatchTransfer
+
+/-- Without an operation key: a legacy transfer, which the proxy protocol 1.0 cannot complete
+(`is_legacy`). -/
+def isLegacy (b : DbBatchTransfer) : Bool := b.operationSecretKey.isNone
+
+/-- `is_expired`: the expiration has passed. -/
+def isExpired (b : DbBatchTransfer) (now : Nat) : Bool := b.expiration.any (· < now)
+
+/-- `is_expired_with_margin`: the expiration has passed by more than `margin`. -/
+def isExpiredWithMargin (b : DbBatchTransfer) (now margin : Nat) : Bool :=
+  b.expiration.any (· + margin < now)
+
+/-- `expired_beyond_skew_margin`: expired on a proxy clock up to the margin behind too. -/
+def expiredBeyondSkewMargin (b : DbBatchTransfer) (now : Nat) : Bool :=
+  b.isExpiredWithMargin now proxyClockSkewMarginSecs
+
+/-- `broadcast_deadline_passed_beyond_skew_margin`: the broadcast deadline (or the expiration)
+plus the clock skew margin has passed. -/
+def broadcastDeadlinePassed (b : DbBatchTransfer) (now : Nat) : Bool :=
+  (b.broadcastDeadline <|> b.expiration).any (· + proxyClockSkewMarginSecs < now)
+
+/-- `confirmation_deadline_passed`: the broadcast deadline plus the confirmation margin has
+passed; never without a broadcast deadline. -/
+def confirmationDeadlinePassed (b : DbBatchTransfer) (now : Nat) : Bool :=
+  b.broadcastDeadline.any (· + confirmationMarginSecs < now)
+
+/-- `incoming_expired`: an incoming transfer that may be failed. One waiting for a released
+transaction waits for its confirmation deadline; a blind receive reserved on proxies waits for
+the expiration on the proxies' clocks too. -/
+def incomingExpired (b : DbBatchTransfer) (now : Nat) : Bool :=
+  if b.status == .waitingBroadcast && b.broadcastDeadline.isSome then
+    b.confirmationDeadlinePassed now
+  else if b.status == .waitingCounterparty && b.retentionDeadline.isSome then
+    b.isExpiredWithMargin now proxyClockSkewMarginSecs
+  else b.isExpired now
+
+end DbBatchTransfer
+
+/-- The `backup_info` row: unix nanosecond times of the last backup and of the last
+operation, and, for multisig wallets, the index of the last hub operation processed. -/
 structure DbBackupInfo where
-  lastBackup : Nat := 0
-  lastOperation : Nat := 0
+  /-- Row index; the table holds a single row. -/
+  idx : Nat := 1
+  lastBackupTimestamp : Nat := 0
+  lastOperationTimestamp : Nat := 0
+  lastProcessedOperationIdx : Option Nat := none
   deriving DecidableEq, Repr, Inhabited
 
 structure Db where
@@ -193,12 +255,70 @@ def allocationsOn (d : Db) (t : DbTxo) : List LocalRgbAllocation :=
       (d.batch? at_.batchTransferIdx).map fun b =>
         ⟨at_.assetId, c.assignment, b.status, c.type.isIncoming, t.spent⟩
 
-/-- Unpaid blind receives on a UTXO (`pending_blinded`). -/
-def pendingBlinded (d : Db) (t : DbTxo) : Nat :=
-  (d.transfers.filter fun tr =>
-    tr.recipientType == some (.blind t.outpoint) &&
+/-- Unpaid blind invoices on a UTXO (`unpaid_invoices`): blind receives waiting for their
+counterparty with no colorings yet. -/
+def unpaidInvoices (d : Db) (o : Outpoint) : List DbTransfer :=
+  d.transfers.filter fun tr =>
+    tr.recipientType == some (.blind o) &&
     (d.batchOfAssetTransfer? tr.assetTransferIdx).any (fun b => b.incoming && b.status == .waitingCounterparty) &&
-    (d.coloringsOf tr.assetTransferIdx).isEmpty).length
+    (d.coloringsOf tr.assetTransferIdx).isEmpty
+
+/-- Slots the live reusable blind invoices on a UTXO keep for the transfers they can still
+receive: the quota less the transfers that did not fail. Without a clock every reusable invoice
+counts as live. -/
+def invoiceSlots (d : Db) (o : Outpoint) (now : Option Nat) : Nat :=
+  let live := d.invoices.filter fun inv => now.all inv.live
+  live.foldl (fun acc inv =>
+    let ts := d.transfers.filter (·.invoiceIdx == some inv.idx)
+    match ts.head?.bind (·.recipientType) with
+    | some (.blind u) =>
+      if u != o then acc else
+      let received := (ts.filter fun t =>
+        (d.batchOfAssetTransfer? t.assetTransferIdx).any (·.status != .failed)).length
+      acc + (inv.quota - received)
+    | _ => acc) 0
+
+/-- Unpaid blind receives on a UTXO (`pending_blinded`), with the slots of live reusable
+invoices. -/
+def pendingBlinded (d : Db) (t : DbTxo) (now : Option Nat := none) : Nat :=
+  (d.unpaidInvoices t.outpoint).length + d.invoiceSlots t.outpoint now
+
+/-- Transport endpoints of a transfer. -/
+def endpointsOf (d : Db) (ti : Nat) : List DbTransferEndpoint :=
+  d.endpoints.filter (·.transferIdx == ti)
+
+/-- Recipient proxy endpoints of a transfer, in their order. -/
+def recipientProxiesOf (d : Db) (ti : Nat) : List DbTransferEndpoint :=
+  (d.endpointsOf ti).filter (·.kind == .recipientProxy)
+
+/-- The sender proxy URL of a transfer, if it has one. -/
+def senderProxyOf? (d : Db) (ti : Nat) : Option String :=
+  ((d.endpointsOf ti).find? (·.kind == .senderProxy)).map (·.endpoint)
+
+/-- Set the `used` flag of a recipient proxy endpoint of a transfer. -/
+def setEndpointUsed (d : Db) (ti : Nat) (url : String) (used : Bool) : Db :=
+  { d with endpoints := d.endpoints.map fun e =>
+      if e.transferIdx == ti && e.endpoint == url && e.kind == .recipientProxy then { e with used }
+      else e }
+
+/-- Save the sender proxy endpoint of a transfer, once (`save_sender_transport_endpoint`). -/
+def saveSenderProxy (d : Db) (ti : Nat) (url : String) : Db :=
+  if (d.senderProxyOf? ti).isSome then d
+  else { d with endpoints := d.endpoints ++ [⟨ti, url, .senderProxy, false⟩] }
+
+/-- Without recipient proxy endpoints a receive exchanges its consignment out of band
+(`uses_out_of_band_exchange`: its invoice names no transport). -/
+def usesOutOfBand (d : Db) (t : DbTransfer) : Bool := (d.recipientProxiesOf t.idx).isEmpty
+
+/-- Every transfer of a batch (`get_batch_transfer_transfers`). -/
+def transfersOfBatch (d : Db) (bi : Nat) : List DbTransfer :=
+  (d.assetTransfersOf bi).flatMap fun a => d.transfersOf a.idx
+
+/-- The asset transfer and transfer of an incoming batch (`get_incoming_transfer`). -/
+def incomingTransfer? (d : Db) (bi : Nat) : Option (DbAssetTransfer × DbTransfer) := do
+  let at_ ← (d.assetTransfersOf bi).head?
+  let t ← (d.transfersOf at_.idx).head?
+  return (at_, t)
 
 /-- Outpoints reserved by pending colored operations. -/
 def reservedColored (d : Db) : List Outpoint := (d.reserved.filter (·.forColored.isSome)).map (·.outpoint)

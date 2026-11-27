@@ -1,3 +1,4 @@
+import Rgb.Core.Hex
 import Rgb.Core.Digest
 import Rgb.Core.Collections
 import Rgb.Bitcoin.Tx
@@ -36,6 +37,7 @@ import Rgb.Examples.Validation
 import Rgb.Examples.Schemas
 import Rgb.Ops.Stock
 import Rgb.Examples.Stock
+import Rgb.Lib.SchemaMap
 import Rgb.Lib.Db
 import Rgb.Lib.Wallet
 import Rgb.Lib.Vanilla
@@ -69,3 +71,8 @@ import Rgb.Examples.Multisig
 import Rgb.Lib.ProxyCrypto
 import Rgb.Lib.Proxy
 import Rgb.Examples.Proxy
+import Rgb.Lib.Recipient
+import Rgb.Lib.ProxyClient
+import Rgb.Examples.ProxyTransfer
+import Rgb.Lib.Mint
+import Rgb.Examples.Mint

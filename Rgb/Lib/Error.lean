@@ -200,4 +200,15 @@ inductive Error where
 /-- Wallet results. -/
 abbrev Result (α : Type) := Except Error α
 
+/-- `BitcoinNetwork::try_from(ChainNet)`: a Liquid chain net fails with its layer 1. -/
+def BitcoinNetwork.ofChainNet (c : ChainNet) : Result BitcoinNetwork :=
+  match c with
+  | .bitcoinMainnet => .ok .mainnet
+  | .bitcoinTestnet3 => .ok .testnet
+  | .bitcoinTestnet4 => .ok .testnet4
+  | .bitcoinSignet => .ok .signet
+  | .bitcoinRegtest => .ok .regtest
+  | .bitcoinSignetCustom => .ok .signetCustom
+  | .liquidMainnet | .liquidTestnet => .error (.unsupportedLayer1 (toString c.layer1))
+
 end Rgb.Lib

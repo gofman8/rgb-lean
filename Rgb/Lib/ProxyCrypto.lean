@@ -64,23 +64,8 @@ private def laneBytes (h : UInt64) : Bytes :=
 def sha256 (s : String) : Bytes :=
   [1, 2, 3, 4].flatMap fun i => laneBytes (lane (0x9e3779b97f4a7c15 * i) s)
 
-/-- Lowercase hex digit of a nibble. -/
-private def hexChar (n : Nat) : Char :=
-  if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
-/-- Lowercase hex of bytes (`hex::encode`). -/
-def hex (b : Bytes) : String :=
-  String.ofList (b.flatMap fun x => [hexChar (x.toNat / 16), hexChar (x.toNat % 16)])
-
 /-- Hex SHA-256 of `s`: how the protocol writes every hash and id. -/
-def sha256Hex (s : String) : String := hex (sha256 s)
-
-/-- A lowercase hex digit. -/
-def isLowerHexDigit (c : Char) : Bool := c.isDigit || ('a' ≤ c && c ≤ 'f')
-
-/-- Text `hex::decode` accepts: an even number of hex digits of either case. -/
-def isHex (s : String) : Bool :=
-  s.length % 2 == 0 && s.all fun c => isLowerHexDigit c || ('A' ≤ c && c ≤ 'F')
+def sha256Hex (s : String) : String := Hex.ofBytes (sha256 s)
 
 /-! ## Operation keys and signatures -/
 
@@ -94,7 +79,7 @@ def SecretKey.pk (sk : SecretKey) : String := sha256Hex ("ed25519/public/" ++ sk
 
 /-- Hex that decodes to 32 bytes, the length `verifying_key_from_bytes` requires; every such key
 is a valid point in the model. -/
-def isPubkeyHex (s : String) : Bool := isHex s && s.length == 64
+def isPubkeyHex (s : String) : Bool := (Hex.toBytes? s).isSome && s.length == 64
 
 /-- An Ed25519 signature: the signer's public key and the hash of the signed message. -/
 structure Ed25519Sig where
@@ -134,8 +119,8 @@ def hkdfExpand (ikm info : String) (n : Nat) : Bytes :=
 /-- `derive_shared(own_sk, their_pk)`: symmetric in the two parties. -/
 def deriveShared (own : SecretKey) (theirPk : String) : DerivedKeys :=
   let ikm := sharedSecret own.pk theirPk
-  { symKey := hex (hkdfExpand ikm infoEnc 32)
-    kmid := hex (hkdfExpand ikm infoMediaId 32)
+  { symKey := Hex.ofBytes (hkdfExpand ikm infoEnc 32)
+    kmid := Hex.ofBytes (hkdfExpand ikm infoMediaId 32)
     sealBlinding := (Bytes.leValue (hkdfExpand ikm infoSealBlinding 8)).toUInt64 }
 
 /-- The shared secret does not depend on which party computes it. -/
@@ -170,7 +155,7 @@ def transferId (invoiceId senderPkHex : String) : String :=
   sha256Hex (transferIdPrefix ++ invoiceId ++ senderPkHex)
 
 /-- `is_transfer_id`: 64 lowercase hex digits, the form of a hex SHA-256. -/
-def isTransferId (s : String) : Bool := s.length == 64 && s.all isLowerHexDigit
+def isTransferId (s : String) : Bool := s.length == 64 && s.all Hex.isLowerDigit
 
 /-! ## Payloads and blobs -/
 

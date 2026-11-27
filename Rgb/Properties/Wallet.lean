@@ -17,16 +17,25 @@ theorem checkFeeRate_ok_iff (r : Nat) : checkFeeRate r = .ok () ↔ 1 ≤ r ∧ 
     · simp [h1, h2]; try omega
     · simp [h1, h2]; try omega
 
-/-- A wallet needs a positive allocation cap. -/
-theorem create_noMaxAllocations (data : WalletData) (keys : SinglesigKeys)
-    (h : data.maxAllocationsPerUtxo = 0) : Wallet.create data keys = .error .noMaxAllocationsPerUtxo := by
-  simp [Wallet.create, h]; rfl
+/-- The key checks come first: keys they refuse fail the wallet with their error. -/
+theorem create_keysFirst (data : WalletData) (keys : SinglesigKeys) (e : Error)
+    (hk : keys.buildDescriptors data.bitcoinNetwork = .error e) :
+    Wallet.create data keys = .error e := by
+  simp [Wallet.create, hk]; rfl
 
-/-- A wallet needs at least one schema. -/
+/-- A wallet with valid keys needs a positive allocation cap. -/
+theorem create_noMaxAllocations (data : WalletData) (keys : SinglesigKeys)
+    (d : WalletDescriptors × Bool) (hk : keys.buildDescriptors data.bitcoinNetwork = .ok d)
+    (h : data.maxAllocationsPerUtxo = 0) :
+    Wallet.create data keys = .error .noMaxAllocationsPerUtxo := by
+  simp [Wallet.create, hk, h]; rfl
+
+/-- A wallet with valid keys needs at least one schema. -/
 theorem create_noSupportedSchemas (data : WalletData) (keys : SinglesigKeys)
+    (d : WalletDescriptors × Bool) (hk : keys.buildDescriptors data.bitcoinNetwork = .ok d)
     (h0 : data.maxAllocationsPerUtxo ≠ 0) (h : data.supportedSchemas = []) :
     Wallet.create data keys = .error .noSupportedSchemas := by
-  simp [Wallet.create, h, h0]; rfl
+  simp [Wallet.create, hk, h, h0]; rfl
 
 /-- An allocation is never both settled and future. -/
 theorem settled_not_future (a : LocalRgbAllocation) : a.settled = true → a.future = false := by

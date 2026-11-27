@@ -35,14 +35,21 @@ def aliceO : Online := aliceOn.2.1
 
 /-! ## Blind receive and send, out of band -/
 
-def recv : Wallet × ReceiveData := (bob1.blindReceive world2.now none (.fungible 600) (world2.now + 86400)).toOption.get!
+/-- The wallet and receive data of a receive that must succeed (out of band: the world stays). -/
+def received (r : Result (Wallet × World × ReceiveData)) : Wallet × ReceiveData :=
+  let (w, _, d) := r.toOption.get!
+  (w, d)
+
+def recv : Wallet × ReceiveData :=
+  received (bob1.blindReceive world2 none (.fungible 600) (world2.now + 86400))
 def bob2 : Wallet := recv.1
 def invoice : ReceiveData := recv.2
 
 def statusOf (w : Wallet) (i : Nat) : Option TransferStatus := (w.db.batch? i).map (·.status)
 
 -- Bob does not know the asset yet: a receive naming it is refused
-#guard (bob1.blindReceive world2.now (some usdt) (.fungible 600) (world2.now + 86400)).map (·.2.invoice)
+#guard (bob1.blindReceive world2 (some usdt) (.fungible 600) (world2.now + 86400)).map
+    (·.2.2.invoice)
   == .error (.assetNotFound usdt)
 -- the receive waits for its counterparty and reserves a slot on a Bob UTXO
 #guard statusOf bob2 invoice.batchTransferIdx == some .waitingCounterparty
@@ -64,11 +71,11 @@ def consignment : Consignment := (ended.2.2.headD default).2
 #guard consignment.bundles.length == 1 && consignment.genesis.contractId.d.data != ""
 
 /-- Bob checks the consignment and ACKs (out of band). -/
-def bobGot : Wallet × World × List (Nat × TransferStatus) :=
+def bobGot : Wallet × World × List (Nat × RefreshedTransfer) :=
   (bob2.provideOutOfBandConsignment world2 bobO consignment).toOption.get!
 def bob3 : Wallet := bobGot.1
 
-#guard bobGot.2.2 == [(invoice.batchTransferIdx, .waitingBroadcast)]
+#guard bobGot.2.2 == [(invoice.batchTransferIdx, ⟨some .waitingBroadcast, none⟩)]
 #guard bob3.assetBalance usdt == ⟨0, 600, 0⟩
 
 /-- Alice receives the ACK and broadcasts. -/
@@ -116,10 +123,20 @@ def aliceDone : Wallet × World × List (Nat × RefreshedTransfer) := (alice7.re
 -- an out-of-band ACK for an unknown recipient
 #guard (alice6.provideOutOfBandAck world2 aliceO "bcrt:utxob:x|y").map (·.2.2)
   == .error (.cannotProvideOutOfBandAck "no transfer found for the provided recipient ID")
+-- one after the operation expired cannot complete the unreleased send
+#guard (alice6.provideOutOfBandAck (world2.setTime (world2.now + 3601)) aliceO
+    invoice.recipientId).map (·.2.2)
+  == .error (.cannotProvideOutOfBandAck "transfer could not be completed")
+-- a begun send is an operation a backup misses, a dry run is not
+#guard begun.1.db.backupInfo.lastOperationTimestamp == world2.now &&
+  (alice5.sendBegin world2 aliceO [(usdt, [toBob])] false 1 1 (world2.now + 3600)
+    (dryRun := true)).map (·.1.db.backupInfo.lastOperationTimestamp)
+    == .ok alice5.db.backupInfo.lastOperationTimestamp
 
 /-! ## Donation -/
 
-def donRecv : Wallet × ReceiveData := (bob1.blindReceive world2.now none (.fungible 100) (world2.now + 86400)).toOption.get!
+def donRecv : Wallet × ReceiveData :=
+  received (bob1.blindReceive world2 none (.fungible 100) (world2.now + 86400))
 def donBegun : Wallet × PendingOp :=
   (alice5.sendBegin world2 aliceO [(usdt, [{ toBob with recipientId := donRecv.2.recipientId, assignment := .fungible 100 }])]
     true 1 1 (world2.now + 3600)).toOption.get!
@@ -130,42 +147,82 @@ def donEnded : Wallet × World × List (String × Consignment) := (donBegun.1.se
 #guard (donEnded.2.1.chain.witnessOrd donBegun.2.txid) == .tentative
 -- the receiver sees the witness already on chain: no ACK round
 #guard ((donRecv.1.provideOutOfBandConsignment donEnded.2.1 bobO (donEnded.2.2.headD default).2).map (·.2.2))
-  == .ok [(donRecv.2.batchTransferIdx, .waitingConfirmations)]
+  == .ok [(donRecv.2.batchTransferIdx, ⟨some .waitingConfirmations, none⟩)]
 
 /-! ## Witness receive -/
 
-def witRecv : Wallet × ReceiveData := (bob1.witnessReceive world2.now none (.fungible 50) (world2.now + 86400)).toOption.get!
+def witRecv : Wallet × ReceiveData :=
+  received (bob1.witnessReceive world2 none (.fungible 50) (world2.now + 86400))
 def witBegun : Wallet × PendingOp :=
   (alice5.sendBegin world2 aliceO
     [(usdt, [{ recipientId := witRecv.2.recipientId, assignment := .fungible 50, witnessData := some ⟨1000, none⟩ }])]
     true 1 1 (world2.now + 3600)).toOption.get!
 def witEnded : Wallet × World × List (String × Consignment) := (witBegun.1.sendEnd world2 aliceO witBegun.2.txid).toOption.get!
-def bobWit : Wallet × World × List (Nat × TransferStatus) :=
+def bobWit : Wallet × World × List (Nat × RefreshedTransfer) :=
   (witRecv.1.provideOutOfBandConsignment witEnded.2.1 bobO (witEnded.2.2.headD default).2).toOption.get!
 
 -- the witness transaction pays Bob's address at output 1 (output 0 is the commitment)
 #guard (witBegun.2.tx.outputs.map (·.value)).take 2 == [0, 1000]
 -- Bob registers the new output as pending until it settles
-#guard bobWit.2.2 == [(witRecv.2.batchTransferIdx, .waitingConfirmations)]
+#guard bobWit.2.2 == [(witRecv.2.batchTransferIdx, ⟨some .waitingConfirmations, none⟩)]
 #guard (bobWit.1.db.txos.filter (·.pendingWitness)).length == 1
 def witWorld : World := { bobWit.2.1 with chain := bobWit.2.1.chain.mine }
 def bobWitDone : Wallet × World × List (Nat × RefreshedTransfer) := (bobWit.1.refresh witWorld bobO).toOption.get!
 #guard bobWitDone.1.assetBalance usdt == ⟨50, 50, 50⟩
 #guard (bobWitDone.1.db.txos.filter (·.pendingWitness)).length == 0
+/-- Two witness receives of Bob paid by one transaction, the first expiring sooner. -/
+def twoA : Wallet × ReceiveData :=
+  received (bob1.witnessReceive world2 none (.fungible 50) (world2.now + 4000))
+def twoB : Wallet × ReceiveData :=
+  received (twoA.1.witnessReceive world2 none (.fungible 30) (world2.now + 86400))
+def twoBegun : Wallet × PendingOp :=
+  let to (d : ReceiveData) (n : UInt64) : Recipient :=
+    { recipientId := d.recipientId, assignment := .fungible n
+      witnessData := some ⟨1000, none⟩ }
+  (alice5.sendBegin world2 aliceO [(usdt, [to twoA.2 50, to twoB.2 30])] false 1 1
+    (world2.now + 3600)).toOption.get!
+def twoEnded : Wallet × World × List (String × Consignment) :=
+  (twoBegun.1.sendEnd world2 aliceO twoBegun.2.txid).toOption.get!
+def twoGot : Wallet × World × List (Nat × RefreshedTransfer) :=
+  let c := (twoEnded.2.2.headD default).2
+  (twoB.1.provideOutOfBandConsignment twoEnded.2.1 bobO c).toOption.get!
+/-- The outputs of the transaction that wait for their receive. -/
+def waitingOuts (w : Wallet) : List UInt32 :=
+  (w.db.txos.filter fun t => t.outpoint.txid == twoBegun.2.txid && t.pendingWitness).map
+    (·.outpoint.vout)
+-- both outputs wait for their receives
+#guard waitingOuts twoGot.1 == [1, 2]
+-- the first receive, failed once expired, frees its output only
+#guard waitingOuts (twoGot.1.failTransfers (world2.setTime (world2.now + 50000)) bobO
+  (some twoA.2.batchTransferIdx)).1 == [2]
 
 /-! ## Failing and deleting -/
 
 -- a pending receive cannot be deleted; once expired it can be failed, then deleted
 #guard (bob2.deleteTransfers world2.now (some invoice.batchTransferIdx)).map (·.2) == .error .cannotDeleteBatchTransfer
 def late : World := { world2 with now := world2.now + 86400 + 1 }
-def bobFailed : Wallet × Bool := (bob2.failTransfers late bobO).toOption.get!
-#guard bobFailed.2 && statusOf bobFailed.1 invoice.batchTransferIdx == some .failed
+def bobFailed : Wallet × World × Result Bool := bob2.failTransfers late bobO
+#guard bobFailed.2.2 == .ok true && statusOf bobFailed.1 invoice.batchTransferIdx == some .failed
 -- the reserved slot is free again
 #guard (bobFailed.1.listUnspents.filter (·.pendingBlinded == 1)).length == 0
 #guard ((bobFailed.1.deleteTransfers late.now (some invoice.batchTransferIdx)).map fun (w, d) =>
   (d, statusOf w invoice.batchTransferIdx)) == .ok (true, none)
 -- a settled transfer cannot be failed
-#guard (bobDone.1.failTransfers world3 bobO (some invoice.batchTransferIdx)).map (·.2) == .error .cannotFailBatchTransfer
+#guard (bobDone.1.failTransfers world3 bobO (some invoice.batchTransferIdx)).2.2
+  == .error .cannotFailBatchTransfer
+/-- A send of all of the asset: no RGB change, its bitcoin change registered before broadcast. -/
+def sendAll : Wallet × PendingOp :=
+  (alice5.sendBegin world2 aliceO [(usdt, [{ toBob with assignment := .fungible 1000 }])] false 1 1
+    (world2.now + 3600)).toOption.get!
+def sendAllIdx : Nat := ((sendAll.1.db.batchByTxid? sendAll.2.txid false).map (·.idx)).getD 0
+def sendAllFailed : Wallet × World × Result Bool :=
+  sendAll.1.failTransfers world2 aliceO (some sendAllIdx)
+/-- Whether a wallet keeps a row of an output of that send's transaction. -/
+def keepsSendAllOut (w : Wallet) : Bool := w.db.txos.any (·.outpoint.txid == sendAll.2.txid)
+-- failed, it keeps the change output's row; deleted, the row goes with it
+#guard sendAllFailed.2.2 == .ok true && keepsSendAllOut sendAllFailed.1 &&
+  (sendAllFailed.1.deleteTransfers world2.now (some sendAllIdx)).map (keepsSendAllOut ·.1)
+    == .ok false
 
 /-! ## The paths taken are allowed by the status machine -/
 

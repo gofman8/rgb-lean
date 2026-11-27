@@ -24,7 +24,8 @@ def wC1 : World := { carolUtxos.2.1 with chain := carolUtxos.2.1.chain.mine }
 
 /-- Alice donates 300 to Carol, who settles with zero confirmations. -/
 def carolRecv : Wallet × ReceiveData :=
-  (carolUtxos.1.blindReceive wC1.now none (.fungible 300) (wC1.now + 86400) (minConfirmations := 0)).toOption.get!
+  received (carolUtxos.1.blindReceive wC1 none (.fungible 300) (wC1.now + 86400)
+    (minConfirmations := 0))
 def aliceOnC : Wallet × Online × Result Unit := alice5.goOnline wC1
 def toCarol : Wallet × PendingOp :=
   (aliceOnC.1.sendBegin wC1 aliceOnC.2.1 [(usdt, [{ recipientId := carolRecv.2.recipientId, assignment := .fungible 300 }])]
@@ -32,7 +33,7 @@ def toCarol : Wallet × PendingOp :=
 def toCarolEnd : Wallet × World × List (String × Consignment) :=
   (toCarol.1.sendEnd wC1 aliceOnC.2.1 toCarol.2.txid).toOption.get!
 def wC2 : World := toCarolEnd.2.1
-def carolGot : Wallet × World × List (Nat × TransferStatus) :=
+def carolGot : Wallet × World × List (Nat × RefreshedTransfer) :=
   (carolRecv.1.provideOutOfBandConsignment wC2 carolO (toCarolEnd.2.2.headD default).2).toOption.get!
 def carolSettled : Wallet := (carolGot.1.refresh wC2 carolO).toOption.get!.1
 
@@ -42,19 +43,19 @@ def carolSettled : Wallet := (carolGot.1.refresh wC2 carolO).toOption.get!.1
 
 /-- Carol pays 100 to Bob, who asks for one confirmation. -/
 def bobRecv : Wallet × ReceiveData :=
-  (bob1.blindReceive wC2.now none (.fungible 100) (wC2.now + 86400) (minConfirmations := 1)).toOption.get!
+  received (bob1.blindReceive wC2 none (.fungible 100) (wC2.now + 86400) (minConfirmations := 1))
 def toBob : Wallet × PendingOp :=
   (carolSettled.sendBegin wC2 carolO [(usdt, [{ recipientId := bobRecv.2.recipientId, assignment := .fungible 100 }])]
     true 1 1 (wC2.now + 3600)).toOption.get!
 def toBobEnd : Wallet × World × List (String × Consignment) :=
   (toBob.1.sendEnd wC2 carolO toBob.2.txid).toOption.get!
 def wC3 : World := toBobEnd.2.1
-def bobGot : Wallet × World × List (Nat × TransferStatus) :=
+def bobGot : Wallet × World × List (Nat × RefreshedTransfer) :=
   (bobRecv.1.provideOutOfBandConsignment wC3 bobO (toBobEnd.2.2.headD default).2).toOption.get!
 
 -- the consignment carries Alice's unconfirmed transfer to Carol: unsafe history
 #guard (toBobEnd.2.2.headD default).2.bundles.length == 2
-#guard bobGot.2.2 == [(bobRecv.2.batchTransferIdx, .waitingSafeHeight)]
+#guard bobGot.2.2 == [(bobRecv.2.batchTransferIdx, ⟨some .waitingSafeHeight, none⟩)]
 -- refresh changes nothing while the history is unconfirmed
 #guard ((bobGot.1.refresh wC3 bobO).toOption.get!.2.2.find? (·.1 == bobRecv.2.batchTransferIdx)).map (·.2.updatedStatus)
   == some none

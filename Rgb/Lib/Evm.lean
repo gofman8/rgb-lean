@@ -53,16 +53,8 @@ def satAdd (a b : Nat) : Nat := min (a + b) Bound.u64
 
 /-! ## Text forms -/
 
-/-- Two lowercase hex digits of a byte. -/
-def hexByte (b : UInt8) : String :=
-  let d (n : Nat) : Char := if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-  String.ofList [d (b.toNat / 16), d (b.toNat % 16)]
-
-/-- Lowercase hex of bytes. -/
-def hexOfBytes (bs : Bytes) : String := String.join (bs.map hexByte)
-
 /-- An address as `0x` and its hex bytes (`EvmAddress` display). -/
-def addressText (a : EvmAddress) : String := "0x" ++ hexOfBytes a.bytes
+def addressText (a : EvmAddress) : String := "0x" ++ Hex.ofBytes a.bytes
 
 /-- The address `check_mint_support` calls (`EvmAddress::default`, twenty zero bytes). -/
 def zeroAddress : EvmAddress := ⟨List.replicate 20 0⟩
@@ -550,12 +542,12 @@ reading the finalized block once per validation or once per claim gives the same
 def mintClaimResolver (n : EvmNode) : ClaimResolver where
   evmChainId := n.chainId.mapError resolverIssue
   isConfirmed expired loc c :=
-    match loc, c with
-    | .evm contract, .lock opid witness amount beforeBlock => do
+    match loc with
+    | .evm contract => do
       let fin ← n.finalizedBlockNumber.mapError resolverIssue
-      let st ← (n.mintLockStatus contract.address (LockId.of opid witness) amount
-        beforeBlock.toNat fin).mapError resolverIssue
-      pure (st == .confirmed, if st == .expired then expired ++ [opid] else expired)
+      let st ← n.mintLockStatus contract.address c.lockId c.amount c.beforeBlock.toNat fin
+        |>.mapError resolverIssue
+      pure (st == .confirmed, if st == .expired then expired ++ [c.opid] else expired)
 
 /-! ## Going online -/
 
@@ -619,5 +611,63 @@ def waitingForMintLocks (net : EvmNet) (urls : EvmRpcUrls) (saved : Option Pendi
 is more than `maxMintLockBlocks` after the latest block. -/
 def receivedMintTooFar (committed : Bool) (beforeBlock latest maxMintLockBlocks : Nat) : Bool :=
   !committed && beforeBlock > satAdd latest maxMintLockBlocks
+
+/-- A mint its recipient checked (`ReceivedMint`, saved as `rcv_mint.json`): what its sender has
+to lock on the bridge. -/
+structure ReceivedMint where
+  opid : String
+  /-- The lock's id; rgb-lib saves its hex text. -/
+  lockId : LockId
+  amount : Nat
+  beforeBlock : Nat
+  evmChainId : Nat
+  /-- The bridge contract's address as text. -/
+  bridgeContract : String
+  deriving DecidableEq, Repr, Inhabited
+
+/-! ## Sent mints -/
+
+/-- The bounds `mint_begin` puts on the block a lock is included before, the latest block of the
+bridge's chain being `latest`: a block is left for the lock, and it is at least
+`minMintLockBlocks` and at most `maxMintLockBlocks` after the latest block. -/
+def checkMintBeforeBlock (beforeBlock latest : Nat) (c : EvmChain) : Except Error Unit := do
+  if beforeBlock ≤ satAdd latest 1 then
+    throw (.invalidBeforeBlock (s!"the lock cannot be included before block {beforeBlock}, " ++
+      s!"the latest external chain block being {latest}"))
+  if beforeBlock < satAdd latest c.minMintLockBlocks then
+    throw (.invalidBeforeBlock (s!"block {beforeBlock} is less than {c.minMintLockBlocks} " ++
+      s!"blocks after the latest external chain block {latest}"))
+  if beforeBlock > satAdd latest c.maxMintLockBlocks then
+    throw (.invalidBeforeBlock (s!"block {beforeBlock} is more than {c.maxMintLockBlocks} " ++
+      s!"blocks after the latest external chain block {latest}"))
+
+/-- A mint as its sender knows it (`SentMint`): what its lock on the bridge has to match. -/
+structure SentMint where
+  contractId : ContractId
+  opid : OpId
+  /-- Commits to the mint operation and to its witness transaction. -/
+  lockId : LockId
+  amount : UInt64
+  beforeBlock : Nat
+  bridgeLocation : BridgeLocation
+  deriving DecidableEq, Repr
+
+/-- `check_mint_lock`: the bridge records the mint's lock as of the latest finalized block,
+included before the block the mint commits to. Gives the node of the bridge's chain. -/
+def checkMintLock (net : EvmNet) (urls : EvmRpcUrls) (m : SentMint) : Except Error EvmNode := do
+  match m.bridgeLocation with
+  | .evm c =>
+    let n ← evmClient net urls c.chainId.toNat
+    let fin ← n.finalizedBlockNumber
+    match ← n.mintLockStatus c.address m.lockId m.amount m.beforeBlock fin with
+    | .confirmed => return n
+    | .pending => throw (.mintLockNotFound (toString m.opid))
+    | .expired => throw (.mintLockExpired (toString m.opid) m.beforeBlock)
+
+/-- `read_bridge_circulating_supply`: the supply the bridge accounts, when it can be read. -/
+def readCirculatingSupply (n : EvmNode) (contract : EvmAddress) : Option Nat :=
+  match n.circulatingSupply contract with
+  | .ok s => s
+  | .error _ => none
 
 end Rgb.Lib.Evm

@@ -46,14 +46,16 @@ def checkPrecision (p : Nat) : Result Precision :=
 def checkRejectListUrl (u : String) : Result Unit :=
   if (RejectListUrl.mk u).valid then .ok () else .error (.invalidRejectListUrl u)
 
-/-- `check_contract_address`: `0x` then exactly 40 hex digits. -/
+/-- `check_contract_address`: `0x` then exactly 40 hex digits, read as 20 bytes. -/
 def checkContractAddress (a : String) : Result EvmAddress :=
   if !a.startsWith "0x" then .error (.invalidEvmContractAddress "address must start with 0x")
   else
     let h := (a.drop 2).toString
-    if h.length != 40 || !h.toList.all (fun c => c.isDigit || ('a' ≤ c.toLower && c.toLower ≤ 'f')) then
-      .error (.invalidEvmContractAddress "address must be 20 hex-encoded bytes")
-    else .ok ⟨Bytes.ofString (h.take 20).toString⟩
+    match Hex.toBytes? h with
+    | some b => if b.length == 20 then .ok ⟨b⟩ else .error invalid
+    | none => .error invalid
+where
+  invalid : Error := .invalidEvmContractAddress "address must be 20 hex-encoded bytes"
 
 /-- `get_total_issue_amount`: at least one amount unless empty is allowed, none
 zero, the sum fits `u64`. -/
@@ -76,11 +78,12 @@ namespace Wallet
 def checkSchemaSupport (w : Wallet) (s : AssetSchema) : Result Unit :=
   if w.data.supportedSchemas.contains s then .ok () else .error (.unsupportedSchema s)
 
-/-- Distinct UTXOs for the issued allocations: `true` asks for an empty UTXO. -/
-def pickIssueUtxos (w : Wallet) (needsEmpty : List Bool) : Result (List DbTxo) := do
+/-- Distinct UTXOs for the issued allocations: `true` asks for an empty UTXO; `now` tells which
+reusable invoices are live. -/
+def pickIssueUtxos (w : Wallet) (needsEmpty : List Bool) (now : Nat) : Result (List DbTxo) := do
   let mut picked : List DbTxo := []
   for empty in needsEmpty do
-    let t ← w.getUtxo (picked.map (·.outpoint)) false (if empty then some 0 else none)
+    let t ← w.getUtxo (picked.map (·.outpoint)) false (if empty then some 0 else none) (some now)
     picked := picked ++ [t]
   return picked
 
@@ -113,7 +116,7 @@ def finalizeIssuance (w : Wallet) (now : Nat) (schema : AssetSchema) (g : Genesi
   for (t, a) in allocs do
     let (ci, d) := db.fresh
     db := { d with colorings := d.colorings ++ [⟨ci, t.idx, ati, .issue, a⟩] }
-  db := { db with backupInfo := { db.backupInfo with lastOperation := now } }
+  db := { db with backupInfo := { db.backupInfo with lastOperationTimestamp := now } }
   return ({ w with db, stock := w.stock.consumeGenesis g }, asset)
 
 /-- Genesis seal on a UTXO with a blinding derived from the time and position. -/
@@ -133,7 +136,7 @@ def issueAssetNia (w : Wallet) (now : Nat) (ticker name : String) (precision : N
   checkTicker ticker
   checkName name
   let p ← checkPrecision precision
-  let utxos ← w.pickIssueUtxos (amounts.map fun _ => false)
+  let utxos ← w.pickIssueUtxos (amounts.map fun _ => false) now
   let spec : AssetSpec := ⟨⟨ticker⟩, ⟨name⟩, none, p⟩
   let g := { w.baseGenesis Schemas.nia now with
     globals := OrdMap.ofList
@@ -153,7 +156,7 @@ def issueAssetCfa (w : Wallet) (now : Nat) (name : String) (details : Option Str
   let p ← checkPrecision precision
   checkName name
   if let some d := details then checkDetails d
-  let utxos ← w.pickIssueUtxos (amounts.map fun _ => false)
+  let utxos ← w.pickIssueUtxos (amounts.map fun _ => false) now
   let g := { w.baseGenesis Schemas.cfa now with
     globals := OrdMap.ofList
       ([ (Schemas.gsName, [⟨.name ⟨name⟩⟩]), (Schemas.gsPrecision, [⟨.precision p⟩])
@@ -174,7 +177,7 @@ def issueAssetUda (w : Wallet) (now : Nat) (ticker name : String) (details : Opt
   checkTicker ticker
   checkName name
   let p ← checkPrecision precision
-  let utxos ← w.pickIssueUtxos [false]
+  let utxos ← w.pickIssueUtxos [false] now
   let t := utxos.headD default
   let spec : AssetSpec := ⟨⟨ticker⟩, ⟨name⟩, details.map Details.mk, p⟩
   let g := { w.baseGenesis Schemas.uda now with
@@ -201,7 +204,7 @@ def issueAssetIfa (w : Wallet) (now : Nat) (ticker name : String) (precision : N
   let p ← checkPrecision precision
   if let some u := rejectListUrl then checkRejectListUrl u
   let utxos ← w.pickIssueUtxos (amounts.map (fun _ => false) ++ inflationAmounts.map (fun _ => true) ++
-    (if linkRight then [true] else []))
+    (if linkRight then [true] else [])) now
   let assetU := utxos.take amounts.length
   let inflU := (utxos.drop amounts.length).take inflationAmounts.length
   let linkU := utxos.drop (amounts.length + inflationAmounts.length)
@@ -245,6 +248,7 @@ def issueAssetBfa (w : Wallet) (now : Nat) (ticker name : String) (precision : N
     | some a => (checkContractAddress a).map (some ·)
     | none => pure none
   let utxos ← w.pickIssueUtxos ((List.replicate mintRights true) ++ (if linkRight then [true] else []))
+    now
   let mintU := utxos.take mintRights
   let linkU := utxos.drop mintRights
   let bridge : EvmContract := ⟨chainId.toUInt64, addr⟩

@@ -1,3 +1,5 @@
+import Rgb.Core.Hex
+
 /-!
 # Commitments and identifiers
 
@@ -55,13 +57,8 @@ def fingerprint (d : Digest) : UInt64 :=
   (d.tag ++ "#" ++ d.data).foldl
     (fun h c => (h ^^^ c.toNat.toUInt64) * 1099511628211) 14695981039346656037
 
-private def hexDigit (n : Nat) : Char :=
-  if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
 /-- Eight hex digits of the fingerprint. -/
-def short (d : Digest) : String :=
-  let v := d.fingerprint.toNat
-  String.ofList ((List.range 8).reverse.map fun i => hexDigit ((v >>> (4 * i)) % 16))
+def short (d : Digest) : String := Hex.ofNat d.fingerprint.toNat 8
 
 instance : ToString Digest := ⟨short⟩
 instance : Repr Digest := ⟨fun d _ => d.short⟩

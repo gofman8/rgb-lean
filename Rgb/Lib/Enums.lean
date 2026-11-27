@@ -28,6 +28,10 @@ def all : List AssetSchema := [nia, uda, cfa, ifa, bfa]
 def dbValue : AssetSchema → Nat
   | nia => 1 | uda => 2 | cfa => 3 | ifa => 4 | bfa => 5
 
+/-- Name rgb-lib displays (`Display` uses the `Debug` name). -/
+def name : AssetSchema → String
+  | nia => "Nia" | uda => "Uda" | cfa => "Cfa" | ifa => "Ifa" | bfa => "Bfa"
+
 /-- Schema id as rgb-lib prints it. -/
 def schemaIdString : AssetSchema → String
   | nia => "rgb:sch:RWhwUfTMpuP2Zfx1~j4nswCANGeJrYOqDcKelaMV4zU#remote-digital-pegasus"
@@ -130,6 +134,22 @@ def AssetSchema.anyAssignment : AssetSchema → Assignment
   | .nia | .cfa => .fungible 0
   | .uda => .nonFungible
   | .ifa | .bfa => .any
+
+/-- Assignment kinds of the standard schemas (`TypeOfAssignment`). -/
+inductive TypeOfAssignment where
+  | asset
+  | inflationRight
+  | linkRight
+  | mintRight
+  deriving DecidableEq, Repr
+
+/-- The kind of an assignment type (`from_assignment_type`). -/
+def TypeOfAssignment.of? (t : AssignmentType) : Option TypeOfAssignment :=
+  if t == osAsset then some .asset
+  else if t == osInflation then some .inflationRight
+  else if t == osLink then some .linkRight
+  else if t == osMint then some .mintRight
+  else none
 
 /-- Main transition kinds of wallet operations (`TypeOfTransition`). -/
 inductive TypeOfTransition where

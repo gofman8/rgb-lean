@@ -18,44 +18,6 @@ not collide in practice, and the model claims no more than that.
 
 namespace Rgb.Lib
 
-/-! ## Hex text -/
-
-namespace Hex
-
-/-- Lowercase hex digit of `n < 16`. -/
-def digit (n : Nat) : Char := if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
-/-- The low `width` hex digits of `n`, lowercase and zero-padded. -/
-def ofNat (n width : Nat) : String :=
-  String.ofList ((List.range width).reverse.map fun i => digit ((n >>> (4 * i)) % 16))
-
-/-- Value of a hex digit, in either case. -/
-def digitValue? (c : Char) : Option Nat :=
-  if c.isDigit then some (c.toNat - 48)
-  else if 'a' ≤ c ∧ c ≤ 'f' then some (c.toNat - 87)
-  else if 'A' ≤ c ∧ c ≤ 'F' then some (c.toNat - 55)
-  else none
-
-/-- Value of a nonempty string of hex digits. -/
-def toNat? (s : String) : Option Nat :=
-  if s.isEmpty then none else s.toList.foldlM (fun acc c => (digitValue? c).map (acc * 16 + ·)) 0
-
-/-- Lowercase hex of bytes. -/
-def ofBytes (b : Bytes) : String := String.join (b.map fun x => ofNat x.toNat 2)
-
-/-- Bytes of a string of hex digit pairs. -/
-def toBytes? (s : String) : Option Bytes :=
-  let rec go : List Char → Option Bytes
-    | [] => some []
-    | [_] => none
-    | h :: l :: rest => do
-      let v ← toNat? (String.ofList [h, l])
-      let tail ← go rest
-      return v.toUInt8 :: tail
-  go s.toList
-
-end Hex
-
 /-! ## Witness version -/
 
 /-- Name rgb-lib prints (`Display` uses the `Debug` name). -/
@@ -224,7 +186,7 @@ def Xpub.parse? (s : String) : Option Xpub :=
     | "tpub" => some .test
     | _ => none
   kind?.bind fun kind =>
-    if rest.length == 16 && rest.all (fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')) then
+    if rest.length == 16 && rest.all Hex.isLowerDigit then
       (Hex.toNat? (String.ofList rest)).map fun k => ⟨kind, k.toUInt64⟩
     else none
 
@@ -305,12 +267,6 @@ def restoreKeys (network : BitcoinNetwork) (mnemonic : String) (wv : WitnessVers
   | .ok words => .ok (Keys.ofWords network mnemonic words wv)
 
 /-! ## Singlesig keys and descriptors -/
-
-/-- Colored and vanilla descriptors of a wallet (`WalletDescriptors`). -/
-structure WalletDescriptors where
-  colored : String
-  vanilla : String
-  deriving DecidableEq, Repr, Inhabited
 
 /-- Singlesig descriptor of a keychain:
 `{wpkh|tr}([fp/purpose'/coin'/0'/keychain]KEY/*)`, where KEY is the account key

@@ -18,7 +18,7 @@ namespace Wallet
 def importContract (w : Wallet) (now : Nat) (c : Consignment) (size : Nat := 0) : Result Wallet := do
   if size > maxContractSize then throw (.fileTooLarge "contract" maxContractSize)
   if c.transfer then throw (.invalidContract "contract")
-  let some schema := AssetSchema.all.find? (·.rules.schema.schemaId == c.schemaId)
+  let some schema := AssetSchema.ofSchemaId? c.schemaId
     | throw (.unknownRgbSchema (toString c.schemaId))
   w.checkSchemaSupport schema
   let id := toString c.contractId
@@ -28,8 +28,6 @@ def importContract (w : Wallet) (now : Nat) (c : Consignment) (size : Nat := 0) 
   | .ok _ => pure ()
   let (ai, db) := w.db.fresh
   let row := assetRowOf schema c.genesis now
-  let row := if schema == .bfa then { row with initialSupply := 0 } else row
-  let row := if schema == .ifa then { row with knownCirculatingSupply := some row.initialSupply } else row
   return { w with db := { db with assets := db.assets ++ [{ row with idx := ai }] }
                   stock := w.stock.consumeGenesis c.genesis }
 

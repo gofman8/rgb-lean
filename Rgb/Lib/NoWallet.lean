@@ -1,5 +1,5 @@
 import Rgb.Lib.Evm
-import Rgb.Schemas.Standard
+import Rgb.Lib.SchemaMap
 import Rgb.Ops.Witness
 
 /-!
@@ -112,13 +112,10 @@ def ConsignmentValidation.ofStatus (c : Consignment) (isTransfer : Bool) (schema
 
 /-! ## Ids and schemas -/
 
-/-- A hex digit, either case. -/
-def isHexDigit (c : Char) : Bool := c.isDigit || ('a' ≤ c && c ≤ 'f') || ('A' ≤ c && c ≤ 'F')
-
 /-- Read an id text (`Txid::from_str`, `OpId::from_str`): eight hex digits in either case;
 the lowercase form is the text of the id. -/
 def idText? (s : String) : Option String :=
-  if s.length == 8 && s.toList.all isHexDigit then some s.toLower else none
+  if s.length == 8 && s.toList.all Hex.isDigit then some s.toLower else none
 
 /-- Read a decimal `u16` (`u16::from_str`): an optional `+`, then digits. -/
 def parseU16? (s : String) : Option Nat :=
@@ -139,30 +136,6 @@ def parseOpout? (known : List OpId) (s : String) : Option Opout :=
     let opid := (known.find? (toString · == t)).getD ⟨Digest.of "rgb:opid-text" [t]⟩
     pure ⟨opid, ⟨ty.toUInt16⟩, no.toUInt16⟩
   | _ => none
-
-/-- The schema of each asset schema. -/
-def schemaOf : AssetSchema → Schema
-  | .nia => Schemas.nia | .uda => Schemas.uda | .cfa => Schemas.cfa | .ifa => Schemas.ifa
-  | .bfa => Schemas.bfa
-
-/-- rgb-lib's schema of a schema id (`AssetSchema::try_from`); PFA is not one. -/
-def assetSchemaOf? (id : SchemaId) : Option AssetSchema :=
-  AssetSchema.all.find? fun s => (schemaOf s).schemaId == id
-
-/-- Name of a schema as rgb-lib displays it. -/
-def schemaName : AssetSchema → String
-  | .nia => "Nia" | .uda => "Uda" | .cfa => "Cfa" | .ifa => "Ifa" | .bfa => "Bfa"
-
-/-- The network of a chain net (`BitcoinNetwork::try_from`). -/
-def networkOf (c : ChainNet) : Except Error BitcoinNetwork :=
-  match c with
-  | .bitcoinMainnet => .ok .mainnet
-  | .bitcoinTestnet3 => .ok .testnet
-  | .bitcoinTestnet4 => .ok .testnet4
-  | .bitcoinSignet => .ok .signet
-  | .bitcoinRegtest => .ok .regtest
-  | .bitcoinSignetCustom => .ok .signetCustom
-  | .liquidMainnet | .liquidTestnet => .error (.unsupportedLayer1 "liquid")
 
 /-! ## Genesis globals -/
 
@@ -226,13 +199,9 @@ inductive ClaimResolution where
 def customResolver (r : ClaimResolver) : ClaimResolver :=
   { r with isConfirmed := fun ex loc c => (r.isConfirmed ex loc c).map fun (ok, _) => (ok, ex) }
 
-/-- `Claim` order: opid, witness, amount, then before block. -/
-def claimLe : Claim → Claim → Bool
-  | .lock o1 w1 a1 b1, .lock o2 w2 a2 b2 =>
-    ((compare o1 o2).then ((compare w1 w2).then ((compare a1 a2).then (compare b1 b2)))) != .gt
-
 /-- The claims still to confirm, in `Claim` order (`unresolved_claims`). -/
-def unresolvedClaims (pv : PendingValidation) : List Claim := pv.pendingClaims.mergeSort claimLe
+def unresolvedClaims (pv : PendingValidation) : List Claim :=
+  pv.pendingClaims.mergeSort fun a b => compare a b != .gt
 
 /-- `resolve_claims`: confirm each claim in order. A mint the resolver found expired stops at
 once with `mintLockExpired`; the opids of the other unconfirmed claims are returned. -/
@@ -242,29 +211,27 @@ def resolveClaims (pv : PendingValidation) (r : CheckedClaimResolver) (claims : 
   let mut unconfirmed : List OpId := []
   let mut expired : List OpId := []
   for c in claims do
-    let .lock opid _ _ beforeBlock := c
     let (ok, ex) ← (r.isConfirmed expired c).mapError ClaimResolverError.toError
     expired := ex
     if ok then
       match pv.resolveClaim c with
       | .ok pv' => pv := pv'
       | .error e => throw (ClaimResolverError.validation e).toError
-    else if expired.contains opid then
-      throw (.mintLockExpired (toString opid) beforeBlock.toNat)
+    else if expired.contains c.opid then
+      throw (.mintLockExpired (toString c.opid) c.beforeBlock.toNat)
     else
-      unconfirmed := unconfirmed ++ [opid]
+      unconfirmed := unconfirmed ++ [c.opid]
   return (pv, unconfirmed)
 
 /-- Phase 1, then the claims (`validate_with_claims`): the first claim left unconfirmed fails
 with `mintLockNotFound`. -/
 def validateWithClaims (c : Consignment) (expectTransfer : Bool) (schema : AssetSchema)
-    (rules : SchemaRules) (claims : ClaimResolution) (cfg : ValidationConfig) :
-    Except Error PendingValidation := do
-  let pv ← (c.validateDeterministic expectTransfer rules cfg).mapError validationError
+    (claims : ClaimResolution) (cfg : ValidationConfig) : Except Error PendingValidation := do
+  let pv ← (c.validateDeterministic expectTransfer schema.rules cfg).mapError validationError
   let pending := unresolvedClaims pv
   if pending.isEmpty then return pv
   if !schema.supportsMint then
-    throw (.consignmentValidationFailed s!"{schemaName schema} schema does not support claims")
+    throw (.consignmentValidationFailed s!"{schema.name} schema does not support claims")
   let location ← (bridgeLocation c.genesis).mapError fun e =>
     .internal s!"unexpected bridge location error: {e}"
   let resolver ← match claims, location with
@@ -412,12 +379,11 @@ def validateLoaded (c : Consignment) (expectTransfer : Bool) (resolver : Resolve
       match c.bundles.find? (toString ·.witnessId == t) with
       | some wb => pure (some wb.witnessId)
       | none => throw (.offchainTxidNotFound t)
-  let some schema := assetSchemaOf? c.schemaId | throw (.unknownRgbSchema (toString c.schemaId))
-  let some rules := Schemas.rulesOf? c.schemaId
+  let some schema := AssetSchema.ofSchemaId? c.schemaId
     | throw (.unknownRgbSchema (toString c.schemaId))
   let cfg : ValidationConfig := { chainNet := opts.bitcoinNetwork.chainNet, safeHeight
                                   buildOpsDag := schema.supportsRejectList }
-  let pv ← validateWithClaims c expectTransfer schema rules claims cfg
+  let pv ← validateWithClaims c expectTransfer schema claims cfg
   let st ← resolveWitnesses pv (offchainResolver c offchain resolver)
   let known := c.genesis.id :: c.bundles.flatMap fun wb => wb.bundle.knownTransitions.map (·.opid)
   let getList (src : RejectListSource) : Except Error RejectList := do
@@ -490,22 +456,6 @@ def validateConsignment (path : String) (file : ConsignmentFile) (indexer : Inde
     (some (remoteRejectListResolver web net urls false)) safeHeight opts
 
 /-! ## Inspection results -/
-
-/-- Assignment kinds of the standard schemas (`TypeOfAssignment`). -/
-inductive TypeOfAssignment where
-  | asset
-  | inflationRight
-  | linkRight
-  | mintRight
-  deriving DecidableEq, Repr
-
-/-- The kind of an assignment type (`from_assignment_type`). -/
-def TypeOfAssignment.of? (t : AssignmentType) : Option TypeOfAssignment :=
-  if t == Schemas.osAsset then some .asset
-  else if t == Schemas.osInflation then some .inflationRight
-  else if t == Schemas.osLink then some .linkRight
-  else if t == Schemas.osMint then some .mintRight
-  else none
 
 /-- An operation output as inspection shows it (`no_wallet::Opout`). -/
 structure OpoutInfo where
@@ -682,7 +632,7 @@ def typeOfTransition? (t : TransitionType) : Option TypeOfTransition :=
 unsupported", any other "unknown". -/
 def unsupportedAssignment (context : String) (schema : Option AssetSchema)
     (ty : AssignmentType) : Error :=
-  let inSchema := (schema.map fun s => (schemaOf s).ownedTypes.contains ty).getD false
+  let inSchema := (schema.map (·.schema.ownedTypes.contains ty)).getD false
   let kind := if inSchema then "currently unsupported" else "unknown"
   .rgbInspection s!"{context}: {kind} assignment type: {ty}"
 
@@ -727,7 +677,7 @@ def transitionGlobal (ctx : String) (t : GlobalStateType) (v : RevealedData) :
     match v.v with | .amount a => .ok (.burnedInflation a.toNat) | _ => invalid "burnedInflation"
   else if t == Schemas.gsBurnReason then
     match v.v with
-    | .burnReason r => if r.valid then .ok (.burnReason (hexOfBytes r.bytes)) else
+    | .burnReason r => if r.valid then .ok (.burnReason (Hex.ofBytes r.bytes)) else
         invalid "burnReason"
     | _ => invalid "burnReason"
   else if t == Schemas.gsLinkedToContract then
@@ -919,7 +869,8 @@ own id; a transition in the bundles of two witnesses is refused. -/
 def consignmentInspection (c : Consignment) (selected : Txid → Bool → Bool) :
     Except Error ConsignmentInspection := do
   let cid := c.contractId
-  let some schema := assetSchemaOf? c.schemaId | throw (.unknownRgbSchema (toString c.schemaId))
+  let some schema := AssetSchema.ofSchemaId? c.schemaId
+    | throw (.unknownRgbSchema (toString c.schemaId))
   let genesis ← genesisInfo cid schema c.genesis
   let mut index : List (OpId × Transition × Txid) := []
   for wb in c.bundles do
@@ -1077,7 +1028,7 @@ def fillSpvProofs (path : String) (file : ConsignmentFile) (indexer : Indexer) :
   let c ← match file with
     | .transfer c => pure c
     | _ => throw .invalidConsignment
-  let network ← networkOf c.genesis.chainNet
+  let network ← BitcoinNetwork.ofChainNet c.genesis.chainNet
   match indexer.resolver.checkChainNet network.chainNet with
   | .error e => throw (.invalidIndexer (reprStr e))
   | .ok () => pure ()

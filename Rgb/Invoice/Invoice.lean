@@ -2,6 +2,7 @@ import Rgb.Invoice.Amount
 import Rgb.Consensus.Operation
 import Rgb.Lib.Error
 import Rgb.Lib.Objects
+import Rgb.Lib.SchemaMap
 
 /-!
 # RGB invoices
@@ -24,30 +25,6 @@ characters of each part of the URI.
 namespace Rgb.Invoice
 
 /-! ## Text helpers -/
-
-/-- ASCII hex digit of either case. -/
-def isHexDigit (c : Char) : Bool := c.isDigit || ('a' ≤ c && c ≤ 'f') || ('A' ≤ c && c ≤ 'F')
-
-/-- Value of a hex digit. -/
-def hexValue (c : Char) : Nat :=
-  if c.isDigit then c.toNat - '0'.toNat
-  else if 'a' ≤ c && c ≤ 'f' then c.toNat - 'a'.toNat + 10
-  else c.toNat - 'A'.toNat + 10
-
-/-- Lower-case hex digit of a value below 16. -/
-def hexDigitChar (n : Nat) : Char := if n < 10 then Char.ofNat (48 + n) else Char.ofNat (87 + n)
-
-/-- Lower-case hex of bytes (`ToHex`). -/
-def hexOf (bs : Bytes) : String :=
-  String.join (bs.map fun b =>
-    String.ofList [hexDigitChar (b.toNat / 16), hexDigitChar (b.toNat % 16)])
-
-/-- Bytes of hex text of either case; `none` for an odd length or a non-hex character. -/
-def ofHex? (s : String) : Option Bytes :=
-  let cs := s.toList
-  if cs.length % 2 != 0 || !cs.all isHexDigit then none
-  else some ((chunksOf 2 cs).map fun p =>
-    (16 * hexValue (p.headD '0') + hexValue (p.getLastD '0')).toUInt8)
 
 /-- `s` for a transport with TLS. -/
 def tlsSuffix (tls : Bool) : String := if tls then "s" else ""
@@ -165,7 +142,7 @@ inductive Pay2VoutError where
 
 /-- Display text of the error. -/
 def Pay2VoutError.message : Pay2VoutError → String
-  | .invalidAddressType b => s!"unexpected address type byte 0x{hexOf [b]}."
+  | .invalidAddressType b => s!"unexpected address type byte 0x{Hex.ofByte b}."
   | .invalidTapkey => "invalid taproot output key"
 
 namespace Pay2Vout
@@ -372,13 +349,14 @@ def showBeneficiary (codec : IdCodec) (b : XChainNet Beneficiary) : String :=
   b.chainNet.prefix_ ++ ":" ++
     (match b.inner with
       | .blindedSeal s => codec.showSecretSeal s
-      | .witnessVout p k => codec.showPay2Vout p ++ (k.map fun k => "+" ++ hexOf k.bytes).getD "")
+      | .witnessVout p k =>
+        codec.showPay2Vout p ++ (k.map fun k => "+" ++ Hex.ofBytes k.bytes).getD "")
 
 /-- Read an x-only key (`XOnlyPublicKey::from_str`): 64 hex digits of either case, a
 point of the curve. -/
 def parseXOnly (codec : IdCodec) (s : String) : Option XOnlyKey := do
   if s.length != 64 then none
-  let b ← ofHex? s
+  let b ← Hex.toBytes? s
   if codec.xOnlyValid b then some ⟨b⟩ else none
 
 /-- Read a beneficiary (`XChainNet<Beneficiary>::from_str`): split at the first `:`; the
@@ -437,7 +415,7 @@ def isSchemeChar (c : Char) : Bool := c.isAlphanum || "+-.".contains c
 /-- Every character is allowed, or starts a `%HH` escape. -/
 def validRun (allowed : Char → Bool) : List Char → Bool
   | [] => true
-  | '%' :: a :: b :: rest => isHexDigit a && isHexDigit b && validRun allowed rest
+  | '%' :: a :: b :: rest => Hex.isDigit a && Hex.isDigit b && validRun allowed rest
   | '%' :: _ => false
   | c :: rest => allowed c && validRun allowed rest
 
@@ -569,8 +547,9 @@ def percentDecode (s : String) : Except String String :=
 where
   go : List Char → List Nat
     | '%' :: a :: b :: rest =>
-      if isHexDigit a && isHexDigit b then (16 * hexValue a + hexValue b) :: go rest
-      else '%'.toNat :: go (a :: b :: rest)
+      match Hex.digitValue? a, Hex.digitValue? b with
+      | some hi, some lo => (16 * hi + lo) :: go rest
+      | _, _ => '%'.toNat :: go (a :: b :: rest)
     | c :: rest => (String.singleton c).toUTF8.toList.map (·.toNat) ++ go rest
     | [] => []
 
@@ -582,7 +561,7 @@ def queryEncoded (b : UInt8) : Bool :=
 /-- Percent-encode query text (`utf8_percent_encode` with `QUERY_ENCODE`, upper-case hex). -/
 def percentEncode (s : String) : String :=
   String.join (s.toUTF8.toList.map fun b =>
-    if queryEncoded b then "%" ++ (hexOf [b]).toUpper else String.singleton (Char.ofNat b.toNat))
+    if queryEncoded b then "%" ++ (Hex.ofByte b).toUpper else String.singleton (Char.ofNat b.toNat))
 
 /-- Read the query (`map_query_params`): each `&` piece splits at its first `=` (an empty
 query, `&&` and a trailing `&` have none); key, then value, are percent-decoded to UTF-8;
@@ -693,8 +672,9 @@ def parse (codec : IdCodec) (s : String) : Except InvoiceParseError RgbInvoice :
   let (pk, params) := shiftRemove params keyPubkey
   let publicKey ← match pk with
     | none => pure none
-    | some k => match ofHex? k with
-      | some b => if b.length == 32 then pure (some (hexOf b)) else throw (.invalidPublicKey k)
+    | some k => match Hex.toBytes? k with
+      | some b =>
+        if b.length == 32 then pure (some (Hex.ofBytes b)) else throw (.invalidPublicKey k)
       | none => throw (.invalidPublicKey k)
   let (enc, params) := shiftRemove params keyEncryption
   let encryption ← match enc with
@@ -784,7 +764,7 @@ def setExpiryTimestamp (bl : RgbInvoiceBuilder) (expiry : Int) : RgbInvoiceBuild
 
 /-- Sets the 32-byte key as lower-case hex. -/
 def setPublicKey (bl : RgbInvoiceBuilder) (key : Bytes) : RgbInvoiceBuilder :=
-  ⟨{ bl.invoice with publicKey := some (hexOf key) }⟩
+  ⟨{ bl.invoice with publicKey := some (Hex.ofBytes key) }⟩
 
 /-- Sets the encryption preference. -/
 def setEncryption (bl : RgbInvoiceBuilder) (e : Lib.Encryption) : RgbInvoiceBuilder :=
@@ -825,29 +805,12 @@ namespace Rgb.Lib
 
 open Rgb.Invoice
 
-/-- Display name of a layer 1 (`Layer1`, lower case). -/
-def layer1Name : Layer1 → String
-  | .bitcoin => "bitcoin"
-  | .liquid => "liquid"
-
-/-- rgb-lib's network of a chain net (`BitcoinNetwork::try_from(ChainNet)`). -/
-def chainNetToNetwork (c : ChainNet) : Result BitcoinNetwork :=
-  match c with
-  | .bitcoinMainnet => .ok .mainnet
-  | .bitcoinTestnet3 => .ok .testnet
-  | .bitcoinTestnet4 => .ok .testnet4
-  | .bitcoinSignet => .ok .signet
-  | .bitcoinRegtest => .ok .regtest
-  | .bitcoinSignetCustom => .ok .signetCustom
-  | .liquidMainnet | .liquidTestnet => .error (.unsupportedLayer1 (layer1Name c.layer1))
-
-/-- Asset schema of a schema id (`AssetSchema::try_from(SchemaId)`): the displayed id is
-compared with the ids of rgb-lib's schemas. -/
+/-- Asset schema of a schema id (`AssetSchema::try_from(SchemaId)`); an unknown id fails with
+its display text. -/
 def assetSchemaOf (codec : IdCodec) (id : SchemaId) : Result AssetSchema :=
-  let s := codec.showSchemaIdFull id
-  match AssetSchema.all.find? (·.schemaIdString == s) with
+  match AssetSchema.ofSchemaId? id with
   | some a => .ok a
-  | none => .error (.unknownRgbSchema s)
+  | none => .error (.unknownRgbSchema (codec.showSchemaIdFull id))
 
 /-- The assignment an invoice asks for, from its schema, state and assignment name; the
 first matching row wins, else the text of the `InvalidInvoice` error. -/
@@ -920,8 +883,8 @@ def Invoice.new (codec : IdCodec) (s : String) : Result Invoice := do
   let assignment ← (invoiceAssignment assetSchema inv.assignmentState assignmentName).mapError
     Error.invalidInvoice
   let network ← match inv.layer1 with
-    | .bitcoin => chainNetToNetwork inv.chainNetwork
-    | .liquid => throw (Error.unsupportedLayer1 (layer1Name .liquid))
+    | .bitcoin => BitcoinNetwork.ofChainNet inv.chainNetwork
+    | .liquid => throw (Error.unsupportedLayer1 (toString Layer1.liquid))
   let data : InvoiceData :=
     { recipientId := XChainNet.showBeneficiary codec inv.beneficiary
       assetSchema := assetSchema
@@ -950,7 +913,7 @@ def RecipientInfo.new (codec : IdCodec) (id : String) : Result RecipientInfo := 
   let ty := match b.inner with
     | .witnessVout _ _ => RecipientType.witness
     | .blindedSeal _ => RecipientType.blind
-  let network ← chainNetToNetwork b.chainNet
+  let network ← BitcoinNetwork.ofChainNet b.chainNet
   return ⟨id, ty, network⟩
 
 /-- Read a transport endpoint (`TransportEndpoint::new`): a transport

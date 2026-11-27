@@ -42,6 +42,12 @@ structure SinglesigKeys where
 
 def SinglesigKeys.watchOnly (k : SinglesigKeys) : Bool := k.mnemonic.isNone
 
+/-- Colored and vanilla descriptors of a wallet (`WalletDescriptors`). -/
+structure WalletDescriptors where
+  colored : String
+  vanilla : String
+  deriving DecidableEq, Repr, Inhabited
+
 /-- Asset balance (`Balance`): amounts above `u64::MAX` are capped. -/
 structure Balance where
   settled : Nat := 0

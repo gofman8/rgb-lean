@@ -41,7 +41,7 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 
 | Area | Modules | Content |
 |---|---|---|
-| Core | `Core.Digest`, `Core.Collections` | tagged commitments, ordered maps and sets, confinement bounds |
+| Core | `Core.Digest`, `Core.Collections`, `Core.Hex` | tagged commitments, ordered maps and sets, confinement bounds, hex text |
 | Bitcoin | `Bitcoin.Tx`, `Bitcoin.Chain`, `Bitcoin.Merkle` | transactions, outpoints, chain networks; a chain with mempool, blocks, confirmations, reorgs; block merkle trees |
 | Seals | `Consensus.Seal` | genesis and graph seals, witness-output seals, concealment, seal closing |
 | Operations | `Consensus.Ids`, `Consensus.Operation`, `Consensus.Bundle` | genesis, transitions, assignments, global state, metadata, operation ids, transition bundles |
@@ -52,8 +52,9 @@ a number (MPC leaf positions), the model reads 64 bits of the digest.
 | Standard types | `Stl.Types`, `Stl.Value` | ticker, name, details, precision, terms, token data, EVM and bridge types, with their bounds |
 | Containers and stash | `Ops.State`, `Ops.Consignment`, `Ops.Psbt`, `Ops.Witness`, `Ops.Stock` | consignments, fascia; RGB data in a PSBT (transitions, consumer maps, opret host) and its commit; the stash: import, acceptance, composition, visibility, reorg (in)validation |
 | Invoices | `Invoice.Amount`, `Invoice.Invoice` | amounts in fast32 text, coin amounts, allocations; the `rgb:` invoice URI with its parser (every error, in the library's order), printer and builder; rgb-lib's invoice layer: invoice data, the assignment each schema accepts, recipient ids, transport endpoints |
-| Wallet | `Lib.*` | rgb-lib: constants, enums, all 166 errors, objects, database, wallet state, balances, UTXO slots, vanilla operations, issuance of the five schemas, receive, send, refresh, out-of-band exchange, fail and delete, inflate, burn, link, reject lists, the transfer status machine |
-| EVM | `Lib.Evm` | the JSON-RPC reads rgb-lib makes (bridge lock records, circulating supply, reject-list contracts in pages), retries, ABI decoding, mint lock statuses, claim resolvers, the EVM chain checks of `go_online` |
+| Wallet | `Lib.*` | rgb-lib: constants, enums, all 166 errors, objects, database, wallet state, balances, UTXO slots, vanilla operations, issuance of the five schemas, receive, send, refresh, out-of-band exchange, fail and delete, inflate, burn, link, BFA mints (begin, end, received mints waiting for their bridge locks), reject lists, the transfer status machine |
+| Proxies | `Lib.ProxyCrypto`, `Lib.Proxy`, `Lib.ProxyClient` | proxy protocol 1.0, a proxy server, the wallet through proxies |
+| EVM | `Lib.Evm` | the JSON-RPC reads rgb-lib makes (bridge lock records, circulating supply, reject-list contracts in pages), retries, ABI decoding, mint lock statuses, the lock check of a sent mint, claim resolvers, the EVM chain checks of `go_online` |
 | No-wallet API | `Lib.NoWallet` | `validate_consignment` and `validate_consignment_with_resolver` in rgb-lib's check order (offchain witness, claims, both phases, reject lists), consignment and fascia inspection, `fill_spv_proofs` |
 
 ## Bounds at a glance
@@ -81,6 +82,7 @@ The code holds each bound once; this table only points to them.
 | reject list | at most 100 000 entries, 7 900 000 bytes | `Lib.RejectList` |
 | sender proxy retention grace a receiver accepts | at least one day | `Lib.Constants` |
 | EVM reject list read | pages of 1 000 entries, at most 100 000 entries | `Lib.Evm`, `Lib.RejectList` |
+| block a mint's lock is included before | after the block after the latest, `min_mint_lock_blocks` to `max_mint_lock_blocks` after the latest | `Lib.Evm` |
 | EVM request retries | 2, after HTTP 502/503/504 or a send failure other than a timeout | `Lib.Evm` |
 
 ## Scenarios (`Rgb/Examples`)
@@ -94,11 +96,33 @@ The code holds each bound once; this table only points to them.
 - `Stock`: stashes through a transfer and a reorganisation.
 - `Wallet`, `Transfer`, `Operations2`: two rgb-lib wallets: setup, issuance,
   blind and witness receives, sends, donations, out-of-band exchange, refresh,
-  settlement, balances, inflate, burn, link, failing and deleting transfers.
+  settlement, balances, inflate, burn, link and their listing, failing and
+  deleting transfers.
 - `SafeHeight`: a payment settled with zero confirmations and forwarded at once;
   the next receiver waits for the history to be mined; listings; the
   consistency check of `go_online`.
-- `Contracts`: contract import and export, fee estimation.
+- `Proxy`: the proxy protocol: keys, identifiers, encrypted blobs, proof of
+  work, error codes, a proxy server through transfers, NACKs and revocations.
+- `ProxyTransfer`: the two wallets through a proxy: a reserved blind invoice, a
+  send, the ACK releasing the transaction, settlement, a donation, a batch
+  released on its last ACK, a witness receive and the destinations of a payment,
+  address reuse, NACKs, the sender proxy retention grace, the checks of a send,
+  unreachable, draining and authenticated proxies, a reusable invoice,
+  expiration, revocation with `ack.clean`, forged downloads, spam and copies sent
+  to a reusable invoice, a sender proxy that cannot be trusted, a released send
+  near its invoice expiration, refused posts, a download kept after a failed
+  refresh, a receiver without encryption, unsafe history through the proxy,
+  legacy transfers, an expired reusable invoice.
+- `Mint`: a BFA issuance with several mint rights; the checks of a mint begin
+  (last mint right, the bounds on the block the lock is included before, no
+  EVM RPC URL); a mint whose lock is not recorded yet; the receiver checking the
+  mint and waiting for its lock; the lock finalized, the mint ended and accepted,
+  both settling with the bridge's circulating supply; an expired lock failing the
+  mint at its end, by `fail_transfers` and at the receiver; mints a receiver
+  refuses; mints to invoices asking for no amount; a checked mint whose inputs
+  are spent elsewhere; mint rights moved by a send.
+- `Contracts`: contract import and export, fee estimation; an IFA asset imported
+  or received and its known circulating supply.
 - `Psbt`: double spends inside a PSBT, opret host, commit rules.
 - `RejectList`: reject-list decisions.
 - `Invoice`: amounts and allocations as text, the test invoices of
@@ -119,7 +143,8 @@ The code holds each bound once; this table only points to them.
   refreshed, settlement only by refresh from a status that saw the transaction;
 - the bundle id depends on the input map only; a passing opret or tapret
   verification puts the commitment in the first `OP_RETURN` or taproot output;
-- fee-rate bounds, wallet creation rules, allocation predicates.
+- fee-rate bounds, wallet creation rules, allocation predicates;
+- mint lock statuses, and the blocks a mint begin accepts for its lock.
 
 ## Model simplifications
 
@@ -130,5 +155,9 @@ The code holds each bound once; this table only points to them.
 - Fees use a fixed size formula; dust limits are those of the output type.
 - A send spends all state of the asset on its selected UTXOs.
 - A received witness counts as a donation when it is already on chain.
+- A proxy answers every call at once; a call to a URL where no proxy answers
+  fails with the transport error. Contracts carry no media files.
+- A receive does not check the asset's reject list. Whether a wallet accepts
+  received mints (a multisig wallet does not) is a field of the wallet.
 
 [rgb-lib]: https://github.com/RGB-Tools/rgb-lib

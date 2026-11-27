@@ -52,6 +52,15 @@ def walletManifestVersion : Nat := 1
 def backupVersion : Nat := 1
 /-- Only RGB proxy protocol version accepted. -/
 def proxyProtocolVersion : String := "1.0"
+/-- Stop gap of a full scan (`INDEXER_STOP_GAP`). -/
+def indexerStopGap : Nat := 20
+
+/-! ## Wallet directory -/
+
+/-- Log file of a wallet directory, left out of backups (`LOG_FILE`). -/
+def logFile : String := "log"
+/-- Directory an interrupted RGB store migration leaves, left out of backups. -/
+def rgbRuntimeDeletingDir : String := "rgb.deleting"
 
 /-! ## Key derivation -/
 

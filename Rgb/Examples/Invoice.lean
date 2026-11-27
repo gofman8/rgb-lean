@@ -80,7 +80,8 @@ def seals : List (String × SecretSeal) :=
   [("4vm1CX2Z-K8hMo59-e7dgGBS-Jka7mYn-Xe~yP85-yUiHHxr-aVlYa", bobSeal)]
 
 /-- P2WPKH output of rgb-invoicing's witness-vout test. -/
-def bobVout : Pay2Vout := ⟨.wpkh ((ofHex? "c709ed6c37348cc00e8dd3ce9fb9683ec24c15a6").getD [])⟩
+def bobVout : Pay2Vout :=
+  ⟨.wpkh ((Hex.toBytes? "c709ed6c37348cc00e8dd3ce9fb9683ec24c15a6").getD [])⟩
 
 /-- The witness output of rgb-invoicing's tests. -/
 def vouts : List (String × Pay2Vout) :=
@@ -324,7 +325,7 @@ def canonical : List String :=
 #guard roundTrip (dashless s!"rgb:{cNia}/{sTest}/BF/{bob}") == .ok s!"rgb:{cNia}/{sTest}/BF/{bob}"
 -- the witness output and its internal key
 #guard (parse s!"rgb:~/~/~/{bobW}+{ipk}").map (·.beneficiary)
-  == .ok ⟨.bitcoinMainnet, .witnessVout bobVout (some ⟨(ofHex? ipk).getD []⟩)⟩
+  == .ok ⟨.bitcoinMainnet, .witnessVout bobVout (some ⟨(Hex.toBytes? ipk).getD []⟩)⟩
 -- transports, and query text percent-decoded
 #guard (parse (withQuery "endpoints=rpcs://user:pass@host-1.ex-ample.com:1234")).map
   (·.transports) == .ok [.jsonRpc true "user:pass@host-1.ex-ample.com:1234"]
@@ -562,7 +563,7 @@ def stateAfter (r : Option (Except RgbInvoiceBuilder RgbInvoiceBuilder)) :
 def full : RgbInvoice :=
   { (RgbInvoiceBuilder.new bobBeneficiary
       |>.setEncryption .optional
-      |>.setPublicKey ((ofHex? pkHex).getD [])
+      |>.setPublicKey ((Hex.toBytes? pkHex).getD [])
       |>.addTransportRaw (.jsonRpc true "proxy.example.com")
       |>.setExpiryTimestamp 1682086371
       |>.setAssignmentName ⟨"assetOwner"⟩
@@ -583,7 +584,7 @@ def fullExpiry7 : RgbInvoice := { full with unknownQuery := [("expiry", "7")] }
 
 /-- Output key of rgb-invoicing's P2TR payload test. -/
 def tapKey : Bytes :=
-  (ofHex? "85a642598bfe2e42a378cbb53bf14abe77f81aefedf73b667b4285af7cf1c8a3").getD []
+  (Hex.toBytes? "85a642598bfe2e42a378cbb53bf14abe77f81aefedf73b667b4285af7cf1c8a3").getD []
 
 -- 33 bytes: the type, a 20-byte hash and zero bytes, which reading ignores
 #guard (Pay2Vout.toPayload bobVout).length == 33

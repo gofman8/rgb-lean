@@ -23,10 +23,11 @@ namespace Rgb
 
 /-- A statement about an external system that consensus cannot check
 (`Claim::Lock`): the bridge holds a lock of exactly `amount` for operation
-`opid` in witness `witnessId`, recorded before bridge block `beforeBlock`. -/
+`opid` in witness `witnessId`, recorded before bridge block `beforeBlock`.
+Claims are ordered by these fields in turn, as rgb-consensus derives `Ord`. -/
 inductive Claim where
   | lock (opid : OpId) (witnessId : Txid) (amount : UInt64) (beforeBlock : UInt64)
-  deriving DecidableEq, Repr, Inhabited
+  deriving DecidableEq, Ord, Repr, Inhabited
 
 /-- Tag of lock ids. -/
 def lockTag : String := "urn:lnp-bp:rgb:lock#2026-11-04"
@@ -38,11 +39,23 @@ structure LockId where
 
 def LockId.of (opid : OpId) (witness : Txid) : LockId := ⟨Digest.of lockTag [encode opid, encode witness]⟩
 
-def Claim.lockId : Claim → LockId
-  | .lock opid w _ _ => LockId.of opid w
+namespace Claim
 
-def Claim.opid : Claim → OpId
+def opid : Claim → OpId
   | .lock opid _ _ _ => opid
+
+def witness : Claim → Txid
+  | .lock _ w _ _ => w
+
+def amount : Claim → UInt64
+  | .lock _ _ a _ => a
+
+def beforeBlock : Claim → UInt64
+  | .lock _ _ _ b => b
+
+def lockId (c : Claim) : LockId := LockId.of c.opid c.witness
+
+end Claim
 
 /-! ## Contract-state order -/
 

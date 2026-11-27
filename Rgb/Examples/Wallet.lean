@@ -11,9 +11,9 @@ namespace Rgb.Examples.WalletScenario
 
 open Rgb Rgb.Lib
 
-def keysOf (fp : String) : SinglesigKeys :=
-  { accountXpubVanilla := s!"{fp}-v", accountXpubColored := s!"{fp}-c", masterFingerprint := fp
-    mnemonic := some s!"{fp} words" }
+/-- Keys of a scenario wallet on `network`, generated from entropy named by `name`. -/
+def keysOf (name : String) (network : BitcoinNetwork := .regtest) : SinglesigKeys :=
+  .fromKeys (generateKeys network .taproot (Digest.of "scenario/entropy" [name]).fingerprint.toNat)
 
 def dataOf (schemas : List AssetSchema := AssetSchema.all) : WalletData :=
   { bitcoinNetwork := .regtest, maxAllocationsPerUtxo := 5, supportedSchemas := schemas }
@@ -23,10 +23,17 @@ def alice0 : Wallet := (Wallet.create dataOf (keysOf "alice")).toOption.get!
 -- wallet creation rules
 #guard Wallet.create { dataOf with maxAllocationsPerUtxo := 0 } (keysOf "x") matches .error .noMaxAllocationsPerUtxo
 #guard Wallet.create (dataOf []) (keysOf "x") matches .error .noSupportedSchemas
-#guard Wallet.create { dataOf with bitcoinNetwork := .mainnet } (keysOf "x")
+#guard Wallet.create { dataOf with bitcoinNetwork := .mainnet } (keysOf "x" .mainnet)
   matches .error (.cannotUseSchemaOnMainnet .ifa)
-#guard (Wallet.create { dataOf [.nia, .uda, .cfa] with bitcoinNetwork := .mainnet } (keysOf "x")) matches .ok _
-#guard (Wallet.create { dataOf with bitcoinNetwork := .mainnet, allowRecklessSchemas := true } (keysOf "x")) matches .ok _
+#guard (Wallet.create { dataOf [.nia, .uda, .cfa] with bitcoinNetwork := .mainnet }
+  (keysOf "x" .mainnet)) matches .ok _
+#guard (Wallet.create { dataOf with bitcoinNetwork := .mainnet, allowRecklessSchemas := true }
+  (keysOf "x" .mainnet)) matches .ok _
+-- the key checks come first: keys of another network, an xpub that does not parse
+#guard Wallet.create { dataOf with maxAllocationsPerUtxo := 0 } (keysOf "x" .mainnet)
+  matches .error .invalidBitcoinKeys
+#guard Wallet.create (dataOf []) { keysOf "x" with accountXpubColored := "x-c" }
+  matches .error (.invalidPubkey _)
 
 /-- Fund Alice's first vanilla address with 100000 sats. -/
 def fundAddr : Script × Wallet := alice0.getAddress
@@ -98,6 +105,10 @@ def usdt : String := issued.2.id
 #guard ((alice3.issueAssetBfa 1 "₿" "Bridged" 0 2 1 "0x0000000000000000000000000000000000000001").map
   fun (w, a) => (w.listUnspents.filter (·.rgbAllocations.any (·.assignment == .mintRight))).length == 2 &&
     a.initialSupply == 0) == .ok true
+-- the bridge contract address is read as its 20 bytes, from hex of either case
+def bridgeAddr : String := "0x" ++ String.ofList (List.replicate 38 '0') ++ "Ff"
+#guard ((alice3.issueAssetBfa 1 "₿" "Bridged" 0 2 1 bridgeAddr).map (·.2.bridgeLocation))
+  == .ok (some (.evm ⟨1, ⟨List.replicate 19 0 ++ [255]⟩⟩))
 
 /-! ## Pending vanilla transactions -/
 

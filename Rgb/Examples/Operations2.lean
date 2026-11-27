@@ -58,6 +58,9 @@ def history2 : Consignment := (a3.stock.consign (a3.contractIdOf? inf).get! [] [
 #guard (a3.burn w2 o inf 0) matches .error .noBurnAmount
 #guard (a3.burn w2 o inf 5 (some "zz")) matches .error (.invalidBurnReason _)
 #guard (a3.burn w2 o inf 5 (some "abcd")) matches .error (.invalidBurnReason "expected 32 bytes, got 2")
+-- the reason is hex of either case
+#guard (a3.burn w2 o inf 5 (some "ABCD"))
+  matches .error (.invalidBurnReason "expected 32 bytes, got 2")
 #guard (a3.burn w2 o inf 1000) matches .error (.insufficientAssignments _ _)
 
 /-! ## Link -/
@@ -78,5 +81,15 @@ def linked : Wallet × World × Txid := (a4.link w2 o inf kid).toOption.get!
 -- a second link needs a second right
 def w3 : World := { linked.2.1 with chain := linked.2.1.chain.mine }
 #guard ((linked.1.refresh w3 o).toOption.get!.1.link w3 o inf kid) matches .error (.insufficientAssignments _ _)
+
+/-! ## Listing -/
+
+-- the issuance, the inflation, the burn and the link are listed with their kinds
+#guard (linked.1.transferStatuses inf).map (·.2.2) == [.issuance, .inflation, .burn, .link]
+-- each with what it asked for; the inflation pays an output of the wallet, as a recipient
+#guard ((linked.1.listTransfers (some inf)).map fun l => l.map (·.requestedAssignment))
+  == .ok [none, some (.fungible 30), some (.fungible 40), some .linkRight]
+#guard ((a2.listTransfers (some inf)).map fun l => l.map (·.receiveUtxo))
+  == .ok [none, some ⟨inflated.2.2, 1⟩]
 
 end Rgb.Examples.IfaOperations

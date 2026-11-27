@@ -684,7 +684,7 @@ structure Party where
   /-- Role learned at `go_online`; `none` while offline. -/
   role : Option UserRole := none
   /-- The `backup_info` row: backup times and the last processed operation. -/
-  backupInfo : Option Backup.Info := none
+  backupInfo : Option DbBackupInfo := none
   /-- Derivation index of the colored and the vanilla keychain (`none`: no address). -/
   coloredIndex : Option Nat := none
   vanillaIndex : Option Nat := none
