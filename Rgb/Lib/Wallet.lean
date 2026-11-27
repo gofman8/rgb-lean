@@ -260,6 +260,41 @@ def transferKind (w : Wallet) (t : DbTransfer) : TransferKind :=
       | _ => .send
   | none, _ => .send
 
+/-- An asset as `list_assets` shows it, with its balance. -/
+def assetInfo (w : Wallet) (a : DbAsset) : AssetInfo :=
+  { assetId := a.id, schema := a.schema, ticker := a.ticker, name := a.name, details := a.details
+    precision := a.precision, issuedSupply := a.initialSupply, maxSupply := a.maxSupply.getD a.initialSupply
+    knownCirculatingSupply := a.knownCirculatingSupply.getD a.initialSupply, timestamp := a.timestamp
+    addedAt := a.addedAt, balance := w.assetBalance a.id, rejectList := a.rejectList
+    bridgeLocation := a.bridgeLocation, linkedFromContract := a.linkedFromContract
+    linkedToContract := a.linkedToContract }
+
+/-- Assets of the requested schemas (all when none is given), in schema order (`list_assets`). -/
+def listAssets (w : Wallet) (schemas : List AssetSchema := []) : List AssetInfo :=
+  let ss := if schemas.isEmpty then AssetSchema.all else schemas
+  ss.flatMap fun s => (w.db.assets.filter (·.schema == s)).map w.assetInfo
+
+/-- Transfers of an asset as `list_transfers` shows them. -/
+def listTransfers (w : Wallet) (assetId : Option String) : Result (List TransferView) := do
+  if let some id := assetId then
+    if (w.db.asset? id).isNone then throw (.assetNotFound id)
+  return (w.db.transfers.filterMap fun t =>
+    (w.db.assetTransfers.find? (·.idx == t.assetTransferIdx)).bind fun a =>
+      if a.assetId != assetId || !a.userDriven then none else
+      (w.db.batch? a.batchTransferIdx).map fun b =>
+        let colorings := w.db.coloringsOf a.idx
+        { idx := t.idx, batchTransferIdx := b.idx, createdAt := b.createdAt, updatedAt := b.updatedAt
+          status := b.status, requestedAssignment := t.requestedAssignment
+          assignments := (colorings.filter (·.type != .input)).map (·.assignment)
+          kind := w.transferKind t, txid := b.txid, recipientId := t.recipientId
+          receiveUtxo := match t.recipientType with
+            | some (.blind o) => some o
+            | some (.witness (some v)) => b.txid.map (⟨·, v⟩)
+            | _ => none
+          changeUtxos := ((colorings.filter (·.type == .change)).filterMap fun c =>
+            (w.db.txoByIdx? c.txoIdx).map (·.outpoint))
+          expirationTimestamp := b.expiration })
+
 /-- Status of every transfer of an asset, by batch index. -/
 def transferStatuses (w : Wallet) (assetId : String) : List (Nat × TransferStatus × TransferKind) :=
   (w.db.transfers.filterMap fun t =>

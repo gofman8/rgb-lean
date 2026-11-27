@@ -29,7 +29,7 @@ def commitBundles (tx : Tx) (bundles : List (ContractId × TransitionBundle)) (e
   let msgs := OrdMap.ofList (bundles.map fun (c, b) => (c, b.bundleId))
   let tree ← (Mpc.MerkleTree.tryCommit msgs entropy).mapError .mpc
   let tx' := tx.withOpretCommitment tree.commitment
-  return ⟨⟨tx', tree, .opret, none⟩, OrdMap.ofList bundles⟩
+  return ⟨⟨tx', tree, .opret, none, []⟩, OrdMap.ofList bundles⟩
 
 /-- The witness bundle of one contract of a fascia. -/
 def Fascia.witnessBundle? (f : Fascia) (cid : ContractId) : Option WitnessBundle := do

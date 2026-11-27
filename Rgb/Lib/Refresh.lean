@@ -237,6 +237,23 @@ def waitConfirmations (w : Wallet) (world : World) (b : DbBatchTransfer) : Resul
     return ({ w with db := w.db.updateBatch b.idx fun x => { x with status := .settled, updatedAt := world.now } },
       some .settled)
 
+/-- Wait until the history is safe (`wait_safe_height`): once every witness other
+than the paying one is mined at or below the safe height, ACK as after validation. -/
+def waitSafeHeight (w : Wallet) (world : World) (b : DbBatchTransfer) : Result (Wallet × Option TransferStatus) := do
+  let some rc := w.inbox.find? (·.batchIdx == b.idx) | return (w, none)
+  let some txid := b.txid | return (w, none)
+  let tip := world.chain.height
+  let safe := tip + 1 - min b.minConfirmations tip
+  let others := (rc.consignment.bundles.map (·.witnessId)).filter (· != txid)
+  let notSafe := others.any fun t => match world.chain.witnessOrd t with
+    | .mined p => p.height > safe
+    | _ => true
+  if notSafe then return (w, none)
+  let st : TransferStatus := if (confirmationsOf world.chain txid).isSome then .waitingConfirmations else .waitingBroadcast
+  let trs := (w.db.assetTransfersOf b.idx).flatMap fun a => w.db.transfersOf a.idx
+  let db := trs.foldl (fun db t => db.updateTransfer t.idx fun t => { t with ack := some true }) w.db
+  return ({ w with db := db.updateBatch b.idx fun x => { x with status := st } }, some st)
+
 /-- Refresh every waiting transfer (`refresh`): each one independently; a failure
 is reported for its batch and leaves it unchanged. -/
 def refresh (w : Wallet) (world : World) (o : Online) : Result (Wallet × World × List (Nat × RefreshedTransfer)) := do
@@ -248,7 +265,7 @@ def refresh (w : Wallet) (world : World) (o : Online) : Result (Wallet × World 
     let step : Result (Wallet × World × Option TransferStatus) := match b.status, b.incoming with
       | .waitingCounterparty, true => .ok (w, world, none)
       | .waitingCounterparty, false => .ok (w, world, none)
-      | .waitingSafeHeight, _ => .ok (w, world, none)
+      | .waitingSafeHeight, _ => (w.waitSafeHeight world b).map fun (w', st) => (w', world, st)
       | _, _ => (w.waitConfirmations world b).map fun (w', st) => (w', world, st)
     match step with
     | .ok (w', world', st) =>

@@ -199,11 +199,15 @@ def consumeBundle (s : Stock) (cid : ContractId) (b : TransitionBundle) (witness
     s := addAssignments s cid (.transition t) (some witness) (some bid)
   return s
 
-/-- Store a seal witness, keeping a stored SPV proof. -/
+/-- Store a seal witness, merging it with a stored copy: a whole tree is kept,
+known proofs are joined, a stored SPV proof is kept. -/
 def consumeWitness (s : Stock) (w : SealWitness) : Stock :=
   match s.witness? w.tx.txid with
-  | some old => { s with witnesses := (s.witnesses.filter (·.tx.txid != w.tx.txid)) ++
-      [{ w with spvProof := old.spvProof <|> w.spvProof }] }
+  | some old =>
+    let tree := if old.mpcTree.messages.isEmpty then w.mpcTree else old.mpcTree
+    let proofs := old.proofs ++ w.proofs.filter fun (c, _) => !(old.proofs.any (·.1 == c))
+    { s with witnesses := (s.witnesses.filter (·.tx.txid != w.tx.txid)) ++
+      [{ w with mpcTree := tree, proofs, spvProof := old.spvProof <|> w.spvProof }] }
   | none => { s with witnesses := s.witnesses ++ [w] }
 
 /-! ## (In)validation -/
@@ -274,10 +278,7 @@ def consumeConsignment (s : Stock) (vc : ValidConsignment) (r : Resolver) : Exce
   for w in c.bundles do
     s := putWitnessOrd s w.witnessId ((ordOf w.witnessId).getD .archived)
     s ← s.consumeBundle cid w.bundle w.witnessId
-    let tree : Mpc.MerkleTree :=
-      { depth := w.anchor.mpcProof.path.length, cofactor := w.anchor.mpcProof.cofactor, entropy := 0
-        messages := OrdMap.ofList [(cid, w.bundle.bundleId)] }
-    s := s.consumeWitness ⟨w.tx, tree, w.anchor.dbcProof, w.spvProof⟩
+    s := s.consumeWitness ⟨w.tx, default, w.anchor.dbcProof, w.spvProof, [(cid, w.anchor.mpcProof)]⟩
   return s.revalidate
 
 /-- Consume a fascia (`consume_fascia`): store the witness with the given status

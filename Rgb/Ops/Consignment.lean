@@ -156,6 +156,8 @@ structure SealWitness where
   mpcTree : Mpc.MerkleTree
   dbcProof : DbcProof
   spvProof : Option SpvProof := none
+  /-- MPC proofs of contracts known without the whole tree (from consignments). -/
+  proofs : List (ContractId × Mpc.MerkleProof) := []
   deriving DecidableEq, Repr, Inhabited
 
 /-- What a completed PSBT exports for the stash (`Fascia`): the seal witness and
@@ -167,8 +169,11 @@ structure Fascia where
 
 def Fascia.witnessId (f : Fascia) : Txid := f.sealWitness.tx.txid
 
-/-- Anchor of one contract's bundle in a seal witness (`to_merkle_proof`). -/
+/-- Anchor of one contract's bundle in a seal witness (`to_merkle_proof`): a known
+proof of the contract, or one taken from the whole tree. -/
 def SealWitness.anchor? (w : SealWitness) (cid : ContractId) : Option Anchor :=
-  (w.mpcTree.proof? cid).map fun p => ⟨p, w.dbcProof⟩
+  match w.proofs.find? (·.1 == cid) with
+  | some (_, p) => some ⟨p, w.dbcProof⟩
+  | none => (w.mpcTree.proof? cid).map fun p => ⟨p, w.dbcProof⟩
 
 end Rgb
