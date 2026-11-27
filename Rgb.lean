@@ -33,3 +33,5 @@ import Rgb.Ops.Consignment
 import Rgb.Ops.Witness
 import Rgb.Examples.Validation
 import Rgb.Examples.Schemas
+import Rgb.Ops.Stock
+import Rgb.Examples.Stock
