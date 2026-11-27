@@ -86,6 +86,12 @@ def selectInputs (w : Wallet) (assetId : String) (need : AssignmentsCollection)
   let mut got : AssignmentsCollection := {}
   for (t, l) in withAsset do
     if got.enough need then break
+    let has := AssignmentsCollection.ofList ((held l).map (·.assignment))
+    let useful := (need.fungible > got.fungible && has.fungible > 0) ||
+      (need.nonFungible && !got.nonFungible && has.nonFungible) ||
+      (need.inflation > got.inflation && has.inflation > 0) || (need.link && !got.link && has.link) ||
+      (need.mint > got.mint && has.mint > 0)
+    if !useful then continue
     picked := picked ++ [t]
     got := (held l).foldl (fun c a => c.add a.assignment) got
   if !got.enough need then throw (.insufficientAssignments assetId got.fungible)
@@ -164,6 +170,24 @@ def saveTransfers (w : Wallet) (op : PendingOp) (locals : List (String × List L
         transfers := d.transfers ++ [tr]
         endpoints := d.endpoints ++ lr.endpoints.map (⟨ti, ·, .recipientProxy, false⟩) }
   return { w with db }
+/-- Build the witness transaction of an RGB operation: when the selected inputs
+cannot pay outputs and fee, add empty colored UTXOs, largest first; with none
+left the operation fails with `insufficientAllocationSlots`. -/
+def buildColoredTx (w : Wallet) (selected : List DbTxo) (outs : List TxOut) (change : Script) (feeRate : Nat) :
+    Result (Tx × List DbTxo) := Id.run do
+  let mut selected := selected
+  let mut extra := (w.availableAllocations (selected.map (·.outpoint)) (some 0)).mergeSort
+    fun a b => a.1.btcAmount ≥ b.1.btcAmount
+  for _ in List.range (extra.length + 1) do
+    match buildTx (selected.map fun t => (t.outpoint, t.btcAmount)) outs change feeRate with
+    | .ok tx => return .ok (tx, selected)
+    | .error (.insufficientBitcoins _ _) =>
+      match extra with
+      | [] => return .error .insufficientAllocationSlots
+      | (t, _, _) :: rest => selected := selected ++ [t]; extra := rest
+    | .error e => return .error e
+  return .error .insufficientAllocationSlots
+
 /-- Prepare a send (`send_begin`): checks, selection, transaction and coloring.
 `recipientMap` maps asset ids to their recipients. -/
 def sendBegin (w : Wallet) (world : World) (o : Online) (recipientMap : List (String × List Recipient))
@@ -211,19 +235,8 @@ def sendBegin (w : Wallet) (world : World) (o : Online) (recipientMap : List (St
     | .witnessVout s => some (⟨lr.amountSat.toUInt64, s⟩ : TxOut)
     | _ => none
   let (changeScript, w) := w.coloredOutputAddress
-  let mut extraBtc := (w.availableAllocations (selected.map (·.outpoint)) (some 0)).mergeSort
-    fun a b => a.1.btcAmount ≥ b.1.btcAmount
-  let mut tx? : Option Tx := none
-  while tx?.isNone do
-    let ins := selected.map fun t => (t.outpoint, t.btcAmount)
-    match buildTx ins (⟨0, .opReturn none⟩ :: witnessOuts) changeScript feeRate with
-    | .ok tx => tx? := some tx
-    | .error (.insufficientBitcoins _ _) =>
-      match extraBtc with
-      | [] => throw .insufficientAllocationSlots
-      | (t, _, _) :: rest => selected := selected ++ [t]; extraBtc := rest
-    | .error e => throw e
-  let tx0 := tx?.getD default
+  let (tx0, sel) ← w.buildColoredTx selected (⟨0, .opReturn none⟩ :: witnessOuts) changeScript feeRate
+  selected := sel
   let changeVout? : Option Nat :=
     if tx0.outputs.length > 1 + witnessOuts.length then some (1 + witnessOuts.length) else none
   -- change slots: the bitcoin change output, then existing UTXOs with room
@@ -235,31 +248,48 @@ def sendBegin (w : Wallet) (world : World) (o : Online) (recipientMap : List (St
       GraphSeal.ofOutpoint ((free.headD default).1.outpoint) (now.toUInt64 * 13 + k.toUInt64)
   if changeVout?.isNone && (w.availableAllocations (selected.map (·.outpoint))).isEmpty then
     throw .insufficientAllocationSlots
-  -- coloring: per asset a transfer; other allocations on spent UTXOs move to change
+  -- coloring: per asset and assignment type one transition of the type's default
+  -- transition, paying the recipients of that type with the change back; state of
+  -- any contract left on the spent UTXOs moves to change
   let mut bundles : List (ContractId × List Transition) := []
   let mut k := 0
   let spent := selected.map (·.outpoint)
   for (assetId, ls) in sortedAssets do
     let some cid := w.contractIdOf? assetId | throw (.assetNotFound assetId)
+    let some g := w.stock.genesis? cid | throw (.assetNotFound assetId)
+    let defaultTt (ty : AssignmentType) : TransitionType :=
+      ((w.stock.rules? g.schemaId).bind fun r => r.schema.defaultTransitionFor? ty).getD Schemas.tsTransfer
     let states := spent.flatMap fun op => w.stashState cid op
-    let total := (states.filterMap (·.2.amount?)).foldl (· + ·.toNat) 0
-    let paid := (ls.map (·.assignment.mainAmount)).sum
-    let isFungible := ls.all (·.assignment.isFungible)
-    let outs : List (BuilderSeal GraphSeal × AllocatedState) := ls.map fun lr =>
-      let bs : BuilderSeal GraphSeal := match lr.beneficiary, lr.vout with
-        | .blindedSeal s, _ => .concealed s
-        | .witnessVout _, some v => .revealed (GraphSeal.witnessVout v.toUInt32 lr.blinding)
-        | .witnessVout _, none => .concealed default
-      (bs, match lr.assignment with
-        | .fungible n => .amount n
-        | .nonFungible => (states.headD (default, .void)).2
-        | _ => .void)
-    let change := if isFungible && total > paid then [(.revealed (slotSeal k), AllocatedState.amount (total - paid).toUInt64)] else []
-    k := k + 1
-    let t : Transition :=
-      { contractId := cid, transitionType := Schemas.tsTransfer, inputs := states.map (·.1)
-        nonce := 0xFFFFFFFFFFFFFFFF, assignments := OrdMap.ofList [(Schemas.osAsset, typedAssigns (outs ++ change))] }
-    bundles := bundles ++ [(cid, [t])]
+    let types := ((states.map (·.1.ty)) ++ ls.filterMap (·.assignment.assignmentType?)).eraseDups
+    let mut ts : List Transition := []
+    for ty in types do
+      let tyStates := states.filter (·.1.ty == ty)
+      let tyRecips := ls.filter (·.assignment.assignmentType? == some ty)
+      let outs : List (BuilderSeal GraphSeal × AllocatedState) := tyRecips.map fun lr =>
+        let bs : BuilderSeal GraphSeal := match lr.beneficiary, lr.vout with
+          | .blindedSeal sec, _ => .concealed sec
+          | .witnessVout _, some v => .revealed (GraphSeal.witnessVout v.toUInt32 lr.blinding)
+          | .witnessVout _, none => .concealed default
+        (bs, match lr.assignment with
+          | .fungible n | .inflationRight n => .amount n
+          | .nonFungible => (tyStates.headD (default, .void)).2
+          | _ => .void)
+      -- change: what the inputs hold beyond what the recipients take
+      let total := (tyStates.filterMap (·.2.amount?)).foldl (· + ·.toNat) 0
+      let paid := (tyRecips.map fun lr => lr.assignment.mainAmount + lr.assignment.inflationAmount).sum
+      let isAmount := tyStates.any fun (_, st) => st.amount?.isSome
+      let rightsLeft := if isAmount then 0 else tyStates.length - min tyStates.length tyRecips.length
+      let mut change : List (BuilderSeal GraphSeal × AllocatedState) := []
+      if isAmount && total > paid then
+        change := [(.revealed (slotSeal k), .amount (total - paid).toUInt64)]
+        k := k + 1
+      for _ in List.range rightsLeft do
+        change := change ++ [(.revealed (slotSeal k), (tyStates.headD (default, .void)).2)]
+        k := k + 1
+      if !tyStates.isEmpty then
+        ts := ts ++ [{ contractId := cid, transitionType := defaultTt ty, inputs := tyStates.map (·.1)
+                       assignments := OrdMap.ofList [(ty, typedAssigns (outs ++ change))] }]
+    bundles := bundles ++ [(cid, ts)]
   -- extra allocations of other contracts on the spent UTXOs
   for g in w.stock.geneses do
     let cid := g.contractId

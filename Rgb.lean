@@ -44,3 +44,5 @@ import Rgb.Lib.Receive
 import Rgb.Lib.Send
 import Rgb.Lib.Refresh
 import Rgb.Examples.Transfer
+import Rgb.Lib.Operations
+import Rgb.Examples.Operations2
